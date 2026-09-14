@@ -12,8 +12,20 @@ dist
 dist-ssr
 *.local
 
-# 第三方原始数据（客里表等），仅本地保留
-data/raw/
+# 环境变量与密钥（项目根目录；勿提交）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# 用户档案若被拷进仓库
+trips.json
+trips.corrupt-*.json
+
+# 本地工作数据（客里表原始文件等）。锚到仓库根，避免误伤 src/data/
+/data/
 
 # Editor directories and files
 .vscode/*
