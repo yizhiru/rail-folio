@@ -1,3 +1,4 @@
+import type { DurationSegment } from "../../domain/duration";
 import type { Station, Trip } from "../../domain/types";
 import type { OverviewStats } from "../../stats/summarize";
 import { echarts } from "../charts/echarts";
@@ -10,6 +11,7 @@ export const SHARE_HEIGHT = 1960;
 const FOOTER_HEIGHT = 300;
 const MAP_HEIGHT = SHARE_HEIGHT - FOOTER_HEIGHT;
 const FONT = '"PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif';
+const NUM_FONT = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif';
 
 function waitForChartFinished(chart: ReturnType<typeof echarts.init>): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -67,6 +69,55 @@ function fitValueFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
   return `600 ${current}px ${FONT}`;
 }
 
+function durationGap(size: number, kind: "pair" | "unit"): number {
+  return size * (kind === "pair" ? 0.22 : 0.12);
+}
+
+function measureDuration(ctx: CanvasRenderingContext2D, parts: DurationSegment[], size: number): number {
+  const unitSize = Math.round(size * 0.42);
+  let width = 0;
+  parts.forEach((part, index) => {
+    if (index > 0) width += durationGap(size, "pair");
+    ctx.font = `600 ${size}px ${NUM_FONT}`;
+    width += ctx.measureText(String(part.amount)).width;
+    width += durationGap(size, "unit");
+    ctx.font = `500 ${unitSize}px ${FONT}`;
+    width += ctx.measureText(part.unit).width;
+  });
+  return width;
+}
+
+function fitDurationSize(ctx: CanvasRenderingContext2D, parts: DurationSegment[], maxWidth: number): number {
+  let size = 72;
+  while (size > 36 && measureDuration(ctx, parts, size) > maxWidth) size -= 2;
+  return size;
+}
+
+function drawDuration(
+  ctx: CanvasRenderingContext2D,
+  parts: DurationSegment[],
+  centerX: number,
+  y: number,
+  maxWidth: number,
+): void {
+  const size = fitDurationSize(ctx, parts, maxWidth);
+  const unitSize = Math.round(size * 0.42);
+  let x = centerX - measureDuration(ctx, parts, size) / 2;
+  ctx.textAlign = "left";
+  parts.forEach((part, index) => {
+    if (index > 0) x += durationGap(size, "pair");
+    ctx.fillStyle = "#ece7dc";
+    ctx.font = `600 ${size}px ${NUM_FONT}`;
+    const amount = String(part.amount);
+    ctx.fillText(amount, x, y);
+    x += ctx.measureText(amount).width + durationGap(size, "unit");
+    ctx.fillStyle = "#6ea8c9";
+    ctx.font = `500 ${unitSize}px ${FONT}`;
+    ctx.fillText(part.unit, x, y);
+    x += ctx.measureText(part.unit).width;
+  });
+}
+
 function paintChrome(ctx: CanvasRenderingContext2D, stats: OverviewStats): void {
   const w = SHARE_WIDTH;
   const footerTop = MAP_HEIGHT;
@@ -103,9 +154,14 @@ function paintChrome(ctx: CanvasRenderingContext2D, stats: OverviewStats): void 
   items.forEach((item, index) => {
     const x = 72 + col * index + col / 2;
     ctx.textAlign = "center";
-    ctx.fillStyle = "#ece7dc";
-    ctx.font = fitValueFont(ctx, item.value, col - 28, 72);
-    ctx.fillText(item.value, x, valueY);
+    if (item.duration) {
+      drawDuration(ctx, item.duration, x, valueY, col - 28);
+    } else {
+      ctx.fillStyle = "#ece7dc";
+      ctx.font = fitValueFont(ctx, item.value, col - 28, 72);
+      ctx.fillText(item.value, x, valueY);
+    }
+    ctx.textAlign = "center";
     ctx.fillStyle = "#9aa6b5";
     ctx.font = `400 26px ${FONT}`;
     ctx.fillText(item.label, x, labelY);

@@ -8,7 +8,7 @@ export const CATEGORY_COLORS: Record<TrainCategory, string> = {
   P: "#e8c48a",
 };
 
-const MAP_LINE_COLOR = "#8eb8d4";
+const MAP_LINE_COLOR = "#6fe6d2";
 
 export type TripLine = {
   fromId: string;
@@ -24,14 +24,100 @@ export type MapLineVisual = {
   opacity: number;
 };
 
-const LINE_FEW = { width: 1, opacity: 0.38 };
-const LINE_MANY = { width: 2.2, opacity: 0.82 };
+export type LineTier = "low" | "mid" | "high";
 
-/** 同一方向乘过 2 次及以上算「多次」。地图线条只分这两档，不分车型。 */
-export function mapLineVisual(count: number): MapLineVisual {
-  const frequent = count >= 2;
-  const { width, opacity } = frequent ? LINE_MANY : LINE_FEW;
+/** 中档 / 高档的次数下限；达不到的方向归入更低一档。 */
+export type LineCountBreaks = {
+  midMin: number;
+  highMin: number;
+};
+
+const LINE_BY_TIER: Record<LineTier, { width: number; opacity: number }> = {
+  low: { width: 1, opacity: 0.55 },
+  mid: { width: 1.65, opacity: 0.74 },
+  high: { width: 2.4, opacity: 0.92 },
+};
+
+const NO_BREAKS: LineCountBreaks = {
+  midMin: Number.POSITIVE_INFINITY,
+  highMin: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * 按各方向次数的分布做最多三档自然断点（Jenks）：低 / 中 / 高。
+ * 同一次数总在同一档；次数种类不足三档时少分。
+ */
+export function lineCountBreaks(counts: number[]): LineCountBreaks {
+  const values = counts.filter((count) => count > 0);
+  if (values.length === 0) return NO_BREAKS;
+
+  const unique = [...new Set(values)].sort((a, b) => a - b);
+  const classMaxes = naturalClassMaxes(values, Math.min(3, unique.length));
+  if (classMaxes.length <= 1) return NO_BREAKS;
+
+  const nextAfter = (max: number) => unique.find((count) => count > max) ?? Number.POSITIVE_INFINITY;
+  if (classMaxes.length === 2) {
+    return { midMin: Number.POSITIVE_INFINITY, highMin: nextAfter(classMaxes[0]) };
+  }
+  return { midMin: nextAfter(classMaxes[0]), highMin: nextAfter(classMaxes[1]) };
+}
+
+export function lineTier(count: number, breaks: LineCountBreaks): LineTier {
+  if (count >= breaks.highMin) return "high";
+  if (count >= breaks.midMin) return "mid";
+  return "low";
+}
+
+/** 当前图上各方向次数分成低 / 中 / 高，线条粗细与不透明度递增。不分车型。 */
+export function mapLineVisual(count: number, breaks: LineCountBreaks): MapLineVisual {
+  const { width, opacity } = LINE_BY_TIER[lineTier(count, breaks)];
   return { color: MAP_LINE_COLOR, width, opacity };
+}
+
+/** 1D Jenks：返回每一档的最大值，长度 = classCount。 */
+function naturalClassMaxes(values: number[], classCount: number): number[] {
+  const data = [...values].sort((a, b) => a - b);
+  const n = data.length;
+  const k = Math.min(classCount, new Set(data).size);
+  if (k <= 0) return [];
+  if (k === 1) return [data[n - 1]];
+
+  const prefix = new Array<number>(n + 1).fill(0);
+  const prefixSq = new Array<number>(n + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    prefix[i + 1] = prefix[i] + data[i];
+    prefixSq[i + 1] = prefixSq[i] + data[i] * data[i];
+  }
+  const ssd = (from: number, to: number) => {
+    const width = to - from;
+    const sum = prefix[to] - prefix[from];
+    return prefixSq[to] - prefixSq[from] - (sum * sum) / width;
+  };
+
+  const inf = Number.POSITIVE_INFINITY;
+  const cost = Array.from({ length: n + 1 }, () => Array<number>(k + 1).fill(inf));
+  const prev = Array.from({ length: n + 1 }, () => Array<number>(k + 1).fill(0));
+  cost[0][0] = 0;
+  for (let classes = 1; classes <= k; classes++) {
+    for (let end = classes; end <= n; end++) {
+      for (let split = classes - 1; split < end; split++) {
+        const candidate = cost[split][classes - 1] + ssd(split, end);
+        if (candidate < cost[end][classes]) {
+          cost[end][classes] = candidate;
+          prev[end][classes] = split;
+        }
+      }
+    }
+  }
+
+  const maxes: number[] = [];
+  let end = n;
+  for (let classes = k; classes >= 1; classes--) {
+    maxes.push(data[end - 1]);
+    end = prev[end][classes];
+  }
+  maxes.reverse();
+  return maxes;
 }
 
 /** 每个车站作为起点或终点出现的次数。 */

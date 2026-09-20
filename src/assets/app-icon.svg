@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="rail" x1="256" y1="80" x2="256" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#53A9FF"/>
+      <stop offset="48%" stop-color="#3B82E8"/>
+      <stop offset="100%" stop-color="#18468C"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS Dock grid: 824×824 artwork centered on a 1024 canvas -->
+  <g transform="translate(100 100) scale(1.609375)">
+    <rect width="512" height="512" rx="114" fill="#FFFFFF"/>
+    <path d="M120 380 C206 104 340 94 396 148" fill="none" stroke="url(#rail)" stroke-width="44" stroke-linecap="butt"/>
+    <path d="M120 380 C206 104 340 94 396 148" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="butt"/>
+    <circle cx="120" cy="380" r="26" fill="#18468C"/>
+    <circle cx="396" cy="148" r="26" fill="#53A9FF"/>
+  </g>
+</svg>

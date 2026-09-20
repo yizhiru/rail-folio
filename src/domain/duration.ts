@@ -30,19 +30,20 @@ export function tripDurationMin(trip: Trip): { minutes: number } | undefined {
   return { minutes };
 }
 
-export function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes} 分钟`;
+/** 展示精确到分钟，不折成天。整小时不写 0 min。 */
+export type DurationUnit = "h" | "min";
+export type DurationSegment = { amount: number; unit: DurationUnit };
+
+export function durationSegments(minutes: number): DurationSegment[] {
+  if (minutes < 60) return [{ amount: Math.max(0, minutes), unit: "min" }];
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest > 0 && hours < 8 ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+  if (rest > 0) return [{ amount: hours, unit: "h" }, { amount: rest, unit: "min" }];
+  return [{ amount: hours, unit: "h" }];
 }
 
-/** 分享图底部用的紧凑时长，避免把一列撑爆。 */
-export function compactDuration(minutes: number): string {
-  if (minutes <= 0) return "0分钟";
-  if (minutes < 60) return `${minutes}分钟`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  if (hours < 10 && rest > 0) return `${hours}小时${rest}分`;
-  return `${hours}小时`;
+export function formatDuration(minutes: number): string {
+  return durationSegments(minutes)
+    .map((part) => `${part.amount} ${part.unit}`)
+    .join(" ");
 }

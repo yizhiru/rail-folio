@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "火车记",
+        "hiddenTitle": true,
         "width": 1280,
         "height": 840,
         "minWidth": 960,

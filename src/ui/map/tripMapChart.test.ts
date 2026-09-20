@@ -33,6 +33,22 @@ describe("buildMapSeries", () => {
     expect(lines[0].lineStyle.curveness).toBe(lines[1].lineStyle.curveness);
   });
 
+  it("thickens lines by adaptive frequency tiers", () => {
+    const series = buildMapSeries(
+      [
+        trip({ fromStationId: "HGH", toStationId: "UUH" }),
+        trip({ fromStationId: "HGH", toStationId: "AOH" }),
+        trip({ fromStationId: "HGH", toStationId: "AOH" }),
+        ...Array.from({ length: 8 }, () => trip({ fromStationId: "HGH", toStationId: "VNP" })),
+      ],
+      bundledStations,
+    );
+    const lines = (series[0] as { data: Array<{ count: number; lineStyle: { width: number } }> }).data;
+    const widthByCount = new Map(lines.map((line) => [line.count, line.lineStyle.width]));
+    expect(widthByCount.get(1)).toBeLessThan(widthByCount.get(2) ?? 0);
+    expect(widthByCount.get(2)).toBeLessThan(widthByCount.get(8) ?? 0);
+  });
+
   it("merges categories on the same directed pair", () => {
     const series = buildMapSeries(
       [

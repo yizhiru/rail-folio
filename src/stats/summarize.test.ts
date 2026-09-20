@@ -152,6 +152,29 @@ describe("summarizeTrips", () => {
     ];
     const stats = summarizeTrips(trips, bundledStations);
     expect(stats.totalMinutes).toBe(62);
+    expect(stats.durationLabel).toBe("1 h 2 min");
+  });
+
+  it("keeps leftover minutes on long totals", () => {
+    const shanghaiHongqiao = bundledStations.find((s) => s.name === "上海虹桥")!;
+    const nanjingSouth = bundledStations.find((s) => s.name === "南京南")!;
+    const trips: Trip[] = [
+      {
+        id: "1",
+        date: "2024-01-01",
+        trainNo: "Z1",
+        category: "Z",
+        fromStationId: shanghaiHongqiao.id,
+        toStationId: nanjingSouth.id,
+        departureTime: "21:50",
+        arrivalTime: "17:39",
+        source: "manual",
+        fingerprint: "overnight",
+      },
+    ];
+    const stats = summarizeTrips(trips, bundledStations);
+    expect(stats.totalMinutes).toBe(19 * 60 + 49);
+    expect(stats.durationLabel).toBe("19 h 49 min");
   });
 
   it("sums ticket prices only when they are present", () => {
@@ -184,5 +207,51 @@ describe("summarizeTrips", () => {
     expect(stats.totalTicketPrice).toBe(144.5);
     expect(stats.pricedTripCount).toBe(1);
     expect(stats.ticketPriceLabel).toBe("144.5 元");
+  });
+
+  it("ranks directed routes and keeps A→B and B→A apart", () => {
+    const shanghaiHongqiao = bundledStations.find((s) => s.name === "上海虹桥")!;
+    const nanjingSouth = bundledStations.find((s) => s.name === "南京南")!;
+    const trips: Trip[] = [
+      {
+        id: "1",
+        date: "2024-02-10",
+        trainNo: "G123",
+        category: "G",
+        fromStationId: shanghaiHongqiao.id,
+        toStationId: nanjingSouth.id,
+        ticketPrice: 144.5,
+        source: "manual",
+        fingerprint: "a",
+      },
+      {
+        id: "2",
+        date: "2024-08-18",
+        trainNo: "G80",
+        category: "G",
+        fromStationId: shanghaiHongqiao.id,
+        toStationId: nanjingSouth.id,
+        ticketPrice: 553,
+        source: "manual",
+        fingerprint: "b",
+      },
+      {
+        id: "3",
+        date: "2024-01-02",
+        trainNo: "G2",
+        category: "G",
+        fromStationId: nanjingSouth.id,
+        toStationId: shanghaiHongqiao.id,
+        source: "manual",
+        fingerprint: "c",
+      },
+    ];
+    const stats = summarizeTrips(trips, bundledStations);
+    expect(stats.topRoutes[0]).toMatchObject({
+      fromName: "上海虹桥",
+      toName: "南京南",
+      tripCount: 2,
+    });
+    expect(stats.topRoutes).toHaveLength(2);
   });
 });

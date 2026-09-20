@@ -7,6 +7,11 @@ export type YearCount = { year: string; count: number };
 export type CategoryCount = { category: TrainCategory; count: number };
 export type CityCount = { city: string; count: number; stations: string[] };
 export type StationCount = { name: string; count: number };
+export type RouteCount = {
+  fromName: string;
+  toName: string;
+  tripCount: number;
+};
 
 type CityAgg = { count: number; stations: Set<string>; lastSeen: string };
 
@@ -39,7 +44,38 @@ export type OverviewStats = {
   byYear: YearCount[];
   byCategory: CategoryCount[];
   topCities: CityCount[];
+  topRoutes: RouteCount[];
 };
+
+const TOP_CITY_COUNT = 10;
+const TOP_ROUTE_COUNT = 6;
+
+function routeCounts(trips: Trip[], stations: Station[]): RouteCount[] {
+  const stationMap = new Map(stations.map((station) => [station.id, station]));
+  const routes = new Map<string, RouteCount>();
+  for (const trip of trips) {
+    const key = `${trip.fromStationId}|${trip.toStationId}`;
+    const current = routes.get(key);
+    if (current) {
+      current.tripCount += 1;
+      continue;
+    }
+    routes.set(key, {
+      fromName: stationMap.get(trip.fromStationId)?.name ?? trip.fromStationId,
+      toName: stationMap.get(trip.toStationId)?.name ?? trip.toStationId,
+      tripCount: 1,
+    });
+  }
+
+  return [...routes.values()]
+    .sort(
+      (a, b) =>
+        b.tripCount - a.tripCount ||
+        a.fromName.localeCompare(b.fromName) ||
+        a.toName.localeCompare(b.toName),
+    )
+    .slice(0, TOP_ROUTE_COUNT);
+}
 
 export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStats {
   const stationMap = new Map(stations.map((station) => [station.id, station]));
@@ -97,7 +133,7 @@ export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStat
 
   const topCities = [...cityCounts.entries()]
     .sort((a, b) => b[1].count - a[1].count || b[1].lastSeen.localeCompare(a[1].lastSeen))
-    .slice(0, 10)
+    .slice(0, TOP_CITY_COUNT)
     .map(([city, value]) => ({
       city,
       count: value.count,
@@ -123,5 +159,6 @@ export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStat
       .sort((a, b) => b[1] - a[1])
       .map(([category, count]) => ({ category, count })),
     topCities,
+    topRoutes: routeCounts(trips, stations),
   };
 }

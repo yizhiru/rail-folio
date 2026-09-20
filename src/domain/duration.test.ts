@@ -46,9 +46,12 @@ describe("isNextDayArrival", () => {
 });
 
 describe("formatDuration", () => {
-  it("formats hours without converting to days", () => {
-    expect(formatDuration(50)).toBe("50 分钟");
-    expect(formatDuration(185)).toBe("3 小时 5 分钟");
-    expect(formatDuration(26 * 60)).toBe("26 小时");
+  it("uses h / min and keeps leftover minutes", () => {
+    expect(formatDuration(0)).toBe("0 min");
+    expect(formatDuration(50)).toBe("50 min");
+    expect(formatDuration(185)).toBe("3 h 5 min");
+    expect(formatDuration(8 * 60 + 1)).toBe("8 h 1 min");
+    expect(formatDuration(11 * 60 + 11)).toBe("11 h 11 min");
+    expect(formatDuration(26 * 60)).toBe("26 h");
   });
 });

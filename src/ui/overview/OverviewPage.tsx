@@ -6,6 +6,7 @@ import { CATEGORY_COLORS } from "../../map/buildLayers";
 import { summarizeTrips, type OverviewStats } from "../../stats/summarize";
 import { EChart } from "../charts/EChart";
 import type { EChartsOption } from "../charts/echarts";
+import { DurationValue } from "../DurationValue";
 import { TripMap } from "../map/TripMap";
 import { ShareCardDialog } from "./ShareCardDialog";
 import { copyImageBlob, downloadBlob, renderShareCard } from "./shareCard";
@@ -214,7 +215,7 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
         </article>
         <article className="card">
           <div className="label">乘车总时长</div>
-          <div className="value value-compact">{stats.durationLabel}</div>
+          <DurationValue minutes={stats.totalMinutes} />
         </article>
         <article className="card">
           <div className="label">票价合计</div>
@@ -235,22 +236,40 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
       </div>
       {shareError && !shareUrl ? <div className="notice">{shareError}</div> : null}
 
-      <div className="grid-3">
+      <div className="grid-4">
         <article className="card">
           <div className="label">车型占比</div>
           <EChart option={pieOption} className="chart-wrap" />
         </article>
         <article className="card">
-          <div className="label">城市统计</div>
-          {stats.topCities[0] ? (
-            <div className="hint" style={{ marginBottom: 8 }}>
-              最常出现：{stats.topCities[0].city}（{stats.topCities[0].stations.join("、")}）
-            </div>
-          ) : null}
+          <div className="label">往来城市</div>
           <EChart option={cityOption} className="chart-wrap" />
         </article>
+        <article className="card stack">
+          <div className="label">常坐线路</div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table table-routes">
+              <thead>
+                <tr>
+                  <th>区间</th>
+                  <th className="num">次数</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.topRoutes.map((row) => (
+                  <tr key={`${row.fromName}|${row.toName}`}>
+                    <td>
+                      {row.fromName} → {row.toName}
+                    </td>
+                    <td className="num">{row.tripCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
         <article className="card">
-          <div className="label">按年次数</div>
+          <div className="label">年度出行</div>
           <EChart option={yearOption} className="chart-wrap" />
         </article>
       </div>

@@ -30,48 +30,54 @@ export function IngestPage({ ingest }: Props) {
 
   return (
     <section className="page">
-      <div className="card">
-        <div className="toolbar">
-          <select
-            value={source}
-            onChange={(e) => setSource(e.target.value as TripSource)}
-            disabled={busy}
-          >
-            <option value="ocr">火车票图片</option>
-            <option value="12306-screenshot">12306 订单截图</option>
-          </select>
-          <button className="btn" type="button" onClick={() => void pickImages()} disabled={busy}>
-            {busy ? "识别中…" : "选择图片"}
-          </button>
-          <button className="btn secondary" type="button" onClick={() => void pickFolder()} disabled={busy}>
-            选择文件夹
-          </button>
-          <button className="btn" type="button" onClick={() => void syncFrom12306()} disabled={busy}>
-            从 12306 同步
-          </button>
-          {drafts.length > 0 ? (
+      <div className="ingest-split">
+        <article className="card stack">
+          <div className="label">图片导入</div>
+          <div className="toolbar">
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as TripSource)}
+              disabled={busy}
+            >
+              <option value="ocr">火车票图片</option>
+              <option value="12306-screenshot">12306 订单截图</option>
+            </select>
+            <button className="btn" type="button" onClick={() => void pickImages()} disabled={busy}>
+              {busy ? "识别中…" : "选择图片"}
+            </button>
+            <button className="btn secondary" type="button" onClick={() => void pickFolder()} disabled={busy}>
+              选择文件夹
+            </button>
+          </div>
+        </article>
+        <article className="card stack">
+          <div className="label">12306 同步</div>
+          <div className="toolbar">
+            <button className="btn" type="button" onClick={() => void syncFrom12306()} disabled={busy}>
+              {busy ? "同步中…" : "从 12306 同步"}
+            </button>
+          </div>
+        </article>
+      </div>
+      {message ? <p className="notice">{message}</p> : null}
+
+      {drafts.length === 0 ? (
+        <div className="dropzone muted">将图片拖到此处</div>
+      ) : (
+        <div className="card stack" style={{ overflowX: "auto" }}>
+          <div className="toolbar">
             <button
-              className="btn secondary"
+              className="btn"
               type="button"
               onClick={() => void commit()}
               disabled={busy || selectedCount === 0}
             >
               确认入库{selectedCount > 0 ? `（${selectedCount}）` : ""}
             </button>
-          ) : null}
-          {drafts.length > 0 ? (
             <button className="btn danger" type="button" onClick={clearDrafts} disabled={busy}>
               清空列表
             </button>
-          ) : null}
-        </div>
-        {message ? <p className="notice" style={{ marginTop: 12 }}>{message}</p> : null}
-      </div>
-
-      {drafts.length === 0 ? (
-        <div className="dropzone muted">将图片拖到此处</div>
-      ) : (
-        <div className="card" style={{ overflowX: "auto" }}>
+          </div>
           <table className="table">
             <thead>
               <tr>

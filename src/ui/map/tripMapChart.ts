@@ -1,5 +1,11 @@
 import type { Station, Trip } from "../../domain/types";
-import { mapLineVisual, stationCounts, tripLines, uniqueTripStations } from "../../map/buildLayers";
+import {
+  lineCountBreaks,
+  mapLineVisual,
+  stationCounts,
+  tripLines,
+  uniqueTripStations,
+} from "../../map/buildLayers";
 import {
   echarts,
   type EChartsOption,
@@ -36,32 +42,38 @@ type LineDatum = {
 export function buildMapSeries(trips: Trip[], stations: Station[], share = false): SeriesOption[] {
   const stationMap = new Map(stations.map((station) => [station.id, station]));
   const widthBoost = share ? 2.1 : 1;
-  const lines: LineDatum[] = tripLines(trips, stations)
-    .flatMap((line) => {
-      const from = stationMap.get(line.fromId);
-      const to = stationMap.get(line.toId);
-      if (from?.lng == null || from.lat == null || to?.lng == null || to.lat == null) {
-        return [];
-      }
-      const visual = mapLineVisual(line.count);
-      return [
-        {
-          coords: [
-            [from.lng, from.lat],
-            [to.lng, to.lat],
-          ] as [number, number][],
-          fromName: line.fromName,
-          toName: line.toName,
-          count: line.count,
-          lineStyle: {
-            color: visual.color,
-            width: visual.width * widthBoost,
-            opacity: share ? Math.min(0.92, visual.opacity + 0.08) : visual.opacity,
-            // 往返都沿「前进方向」同侧弯曲；若再按 id 取反号，会和坐标对调叠成一条弧。
-            curveness: 0.22,
-          },
+  const drawable = tripLines(trips, stations).flatMap((line) => {
+    const from = stationMap.get(line.fromId);
+    const to = stationMap.get(line.toId);
+    if (from?.lng == null || from.lat == null || to?.lng == null || to.lat == null) {
+      return [];
+    }
+    return [
+      {
+        coords: [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ] as [number, number][],
+        fromName: line.fromName,
+        toName: line.toName,
+        count: line.count,
+      },
+    ];
+  });
+  const breaks = lineCountBreaks(drawable.map((line) => line.count));
+  const lines: LineDatum[] = drawable
+    .map((line) => {
+      const visual = mapLineVisual(line.count, breaks);
+      return {
+        ...line,
+        lineStyle: {
+          color: visual.color,
+          width: visual.width * widthBoost,
+          opacity: share ? Math.min(0.92, visual.opacity + 0.08) : visual.opacity,
+          // 往返都沿「前进方向」同侧弯曲；若再按 id 取反号，会和坐标对调叠成一条弧。
+          curveness: 0.22,
         },
-      ];
+      };
     })
     .sort((a, b) => a.count - b.count);
 

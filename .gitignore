@@ -27,6 +27,11 @@ trips.corrupt-*.json
 # 本地工作数据（客里表原始文件等）。锚到仓库根，避免误伤 src/data/
 /data/
 
+# 推广文案、配图与旧图标归档（不入库）
+docs/promotion.md
+docs/promotion-screenshots/
+src/assets/app-icon.pink-purple/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

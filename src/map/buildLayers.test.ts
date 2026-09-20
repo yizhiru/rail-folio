@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { mapLineVisual, stationCounts, tripLines, uniqueTripStations } from "./buildLayers";
+import {
+  lineCountBreaks,
+  lineTier,
+  mapLineVisual,
+  stationCounts,
+  tripLines,
+  uniqueTripStations,
+  type LineTier,
+} from "./buildLayers";
 import { demoArchive } from "../data/seed";
 import { bundledStations } from "../assets/stations";
 import type { Trip } from "../domain/types";
@@ -39,15 +47,57 @@ describe("tripLines", () => {
   });
 });
 
-describe("mapLineVisual", () => {
-  it("uses only two weights: one trip vs repeated route", () => {
-    const once = mapLineVisual(1);
-    const twice = mapLineVisual(2);
-    const many = mapLineVisual(9);
-    expect(once.color).toBe(twice.color);
-    expect(once.width).toBeLessThan(twice.width);
-    expect(once.opacity).toBeLessThan(twice.opacity);
-    expect(twice).toEqual(many);
+describe("lineCountBreaks / mapLineVisual", () => {
+  it("keeps a single frequency in the low tier", () => {
+    const breaks = lineCountBreaks([1, 1, 1]);
+    expect(lineTier(1, breaks)).toBe("low");
+    expect(mapLineVisual(1, breaks)).toEqual(mapLineVisual(1, lineCountBreaks([4, 4])));
+  });
+
+  it("uses two weights when there are only two frequencies", () => {
+    const breaks = lineCountBreaks([1, 1, 5]);
+    expect(lineTier(1, breaks)).toBe("low");
+    expect(lineTier(5, breaks)).toBe("high");
+    const thin = mapLineVisual(1, breaks);
+    const thick = mapLineVisual(5, breaks);
+    expect(thin.color).toBe(thick.color);
+    expect(thin.width).toBeLessThan(thick.width);
+    expect(thin.opacity).toBeLessThan(thick.opacity);
+  });
+
+  it("splits typical commute vs occasional vs one-off into three tiers", () => {
+    const counts = [1, 1, 1, 2, 2, 12];
+    const breaks = lineCountBreaks(counts);
+    expect(lineTier(1, breaks)).toBe("low");
+    expect(lineTier(2, breaks)).toBe("mid");
+    expect(lineTier(12, breaks)).toBe("high");
+    const low = mapLineVisual(1, breaks);
+    const mid = mapLineVisual(2, breaks);
+    const high = mapLineVisual(12, breaks);
+    expect(low.width).toBeLessThan(mid.width);
+    expect(mid.width).toBeLessThan(high.width);
+    expect(low.opacity).toBeLessThan(mid.opacity);
+    expect(mid.opacity).toBeLessThan(high.opacity);
+  });
+
+  it("keeps clustered frequencies together (1–3 vs 10–12 vs 100)", () => {
+    const breaks = lineCountBreaks([1, 2, 3, 10, 11, 12, 100]);
+    expect([1, 2, 3].map((count) => lineTier(count, breaks))).toEqual(["low", "low", "low"]);
+    expect([10, 11, 12].map((count) => lineTier(count, breaks))).toEqual(["mid", "mid", "mid"]);
+    expect(lineTier(100, breaks)).toBe("high");
+  });
+
+  it("assigns every distinct count to one tier", () => {
+    const counts = [1, 1, 1, 3, 3, 8, 8, 8];
+    const breaks = lineCountBreaks(counts);
+    const byCount = new Map<number, LineTier>();
+    for (const count of counts) {
+      const tier = lineTier(count, breaks);
+      const previous = byCount.get(count);
+      if (previous) expect(tier).toBe(previous);
+      else byCount.set(count, tier);
+    }
+    expect(new Set(byCount.values()).size).toBe(3);
   });
 });
 

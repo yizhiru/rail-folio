@@ -41,49 +41,109 @@ button {
 
 .app {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.app > .page {
-  flex: 1;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .topbar {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 14px 22px;
+  gap: 16px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--line);
-  background: rgba(16, 21, 28, 0.92);
-  position: sticky;
-  top: 0;
+  background: var(--bg);
   z-index: 5;
 }
 
-.brand {
-  letter-spacing: 0.08em;
-  font-size: 14px;
-  font-weight: 600;
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 14px 16px;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
 }
 
 .nav {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-group {
+  padding: 0 16px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
 }
 
 .nav button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
   border: 0;
   background: transparent;
   color: var(--muted);
-  padding: 8px 14px;
+  padding: 11px 16px;
   border-radius: 999px;
+  font-size: 15px;
+  text-align: left;
 }
 
-.nav button.active,
-.nav button:hover {
-  background: var(--bg-elev-2);
+.nav button svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.nav button.active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev));
   color: var(--text);
+}
+
+.nav button:hover {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.nav button.active:hover {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev));
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.shell {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.shell > .page {
+  flex: 1;
 }
 
 .page-help {
@@ -97,14 +157,14 @@ button {
 }
 
 .page-help-mark {
-  width: 22px;
-  height: 22px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1;
 }
@@ -160,6 +220,10 @@ button {
   gap: 12px;
 }
 
+.cards-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .card {
   background: var(--bg-elev);
   border: 1px solid var(--line);
@@ -181,6 +245,39 @@ button {
 
 .card .value-compact {
   font-size: 22px;
+  line-height: 1.25;
+}
+
+.duration-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.42em;
+  margin-top: 8px;
+  line-height: 1;
+}
+
+.duration-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.16em;
+}
+
+.duration-num {
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.duration-unit {
+  color: var(--accent-2);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+  letter-spacing: 0.04em;
 }
 
 .card .hint {
@@ -189,9 +286,47 @@ button {
   margin-top: 6px;
 }
 
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+.seg button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.seg button.active,
+.seg button:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
+  gap: 12px;
+}
+
+.ingest-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
@@ -201,9 +336,19 @@ button {
   gap: 12px;
 }
 
-.map-wrap,
-.chart-wrap {
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.map-wrap {
   height: 540px;
+  overflow: hidden;
+}
+
+.chart-wrap {
+  height: 260px;
   overflow: hidden;
 }
 
@@ -220,10 +365,6 @@ button {
   justify-content: flex-end;
   gap: 12px;
   padding: 4px 8px 8px;
-}
-
-.chart-wrap {
-  height: 260px;
 }
 
 .toolbar {
@@ -279,6 +420,33 @@ textarea {
 .table th {
   color: var(--muted);
   font-weight: 500;
+}
+
+.table th.num,
+.table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 20px;
+}
+
+.table-routes {
+  font-size: 13px;
+}
+
+.table-routes th,
+.table-routes td {
+  padding: 8px 6px;
+}
+
+.table-routes th.num,
+.table-routes td.num {
+  padding-left: 8px;
+}
+
+.table-routes td:first-child {
+  white-space: nowrap;
 }
 
 .badge {
@@ -434,7 +602,7 @@ textarea {
 }
 
 .nav .badge {
-  margin-left: 6px;
+  margin-left: auto;
   background: var(--accent);
   color: #1a120c;
 }
@@ -509,9 +677,56 @@ textarea {
 }
 
 @media (max-width: 980px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 8px 12px 12px;
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    overflow: visible;
+  }
+
+  .nav-section {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .nav-group {
+    display: none;
+  }
+
+  .nav button {
+    width: auto;
+  }
+
+  .sidebar-foot {
+    display: none;
+  }
+
+  .shell {
+    overflow: visible;
+  }
+
   .cards,
+  .cards-4,
   .grid-2,
   .grid-3,
+  .grid-4,
+  .ingest-split,
   .form-grid {
     grid-template-columns: 1fr;
   }
