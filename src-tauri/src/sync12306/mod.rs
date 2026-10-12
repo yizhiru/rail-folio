@@ -42,20 +42,26 @@ fn ensure_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
         .ok_or_else(|| "无法打开 12306 窗口".to_string())
 }
 
-fn eval_json(window: &WebviewWindow, js: &str, timeout: Duration) -> Result<Value, String> {
+/// 页面跳转时脚本可能还没返回。超时或空结果记为 None，由外层继续等。
+fn try_eval_json(
+    window: &WebviewWindow,
+    js: &str,
+    timeout: Duration,
+) -> Result<Option<Value>, String> {
     let (tx, rx) = sync_channel(1);
     window
         .eval_with_callback(js, move |payload| {
             let _ = tx.send(payload);
         })
         .map_err(|err| err.to_string())?;
-    let raw = rx
-        .recv_timeout(timeout)
-        .map_err(|_| "读取 12306 页面超时".to_string())?;
-    if raw.is_empty() || raw == "undefined" {
-        return Ok(Value::Null);
+    let raw = match rx.recv_timeout(timeout) {
+        Ok(raw) => raw,
+        Err(_) => return Ok(None),
+    };
+    if raw.is_empty() || raw == "undefined" || raw == "null" {
+        return Ok(None);
     }
-    serde_json::from_str(&raw).map_err(|err| format!("页面脚本返回无法解析：{err}（{raw}）"))
+    Ok(serde_json::from_str(&raw).ok())
 }
 
 fn window_alive(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
@@ -71,7 +77,149 @@ fn text_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-/// 打开（或复用）12306 窗口，等用户自行登录后在该窗口同源请求订单接口。
+const LOGIN_EXPR: &str =
+    "window.__rfBridge ? window.__rfBridge.loginStatus() : {state:'missing'}";
+const START_LOGIN_EXPR: &str =
+    "window.__rfBridge ? window.__rfBridge.startLoginCheck() : {state:'missing'}";
+const COLLECT_EXPR: &str =
+    "window.__rfBridge ? window.__rfBridge.collectStatus() : {state:'missing'}";
+const START_COLLECT_EXPR: &str =
+    "window.__rfBridge ? window.__rfBridge.startCollect() : {state:'missing'}";
+const PAGE_EXPR: &str = "({ready:document.readyState,path:location.pathname,host:location.hostname})";
+const ORDER_PAGE: &str = "https://kyfw.12306.cn/otn/view/train_order.html";
+
+fn inject_bridge(window: &WebviewWindow) {
+    let _ = window.eval(BRIDGE);
+}
+
+fn wait_for_login(app: &tauri::AppHandle, on_status: &Channel<String>) -> Result<(), String> {
+    let _ = on_status.send("请在弹出的窗口中登录 12306（账号不会保存到火车记）".to_string());
+    let deadline = Instant::now() + Duration::from_secs(10 * 60);
+    let mut checking = false;
+    loop {
+        if Instant::now() > deadline {
+            return Err("等待登录超时。登录完成后请再点一次同步。".into());
+        }
+        let window = window_alive(app)?;
+        inject_bridge(&window);
+        if !checking {
+            let started = try_eval_json(&window, START_LOGIN_EXPR, Duration::from_secs(4))?;
+            match started.as_ref().and_then(|value| text_field(value, "state")) {
+                Some("missing") | None => {
+                    sleep_ms(700);
+                    continue;
+                }
+                _ => checking = true,
+            }
+        }
+        sleep_ms(400);
+        let window = window_alive(app)?;
+        let status = try_eval_json(&window, LOGIN_EXPR, Duration::from_secs(4))?;
+        match status.as_ref().and_then(|value| text_field(value, "state")) {
+            Some("done") => {
+                if status
+                    .as_ref()
+                    .and_then(|value| value.get("loggedIn"))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    return Ok(());
+                }
+                checking = false;
+                sleep_ms(1000);
+            }
+            Some("running") => {}
+            _ => checking = false,
+        }
+    }
+}
+
+fn open_order_page(app: &tauri::AppHandle, on_status: &Channel<String>) -> Result<(), String> {
+    let _ = on_status.send("已登录，正在打开订单页…".to_string());
+    let window = window_alive(app)?;
+    let _ = window.eval(&format!(
+        "if (location.pathname.indexOf('train_order') === -1) {{ location.href = '{ORDER_PAGE}'; }}"
+    ));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if Instant::now() > deadline {
+            return Err("打开订单页超时，请再点一次同步".into());
+        }
+        sleep_ms(400);
+        let window = window_alive(app)?;
+        let Some(page) = try_eval_json(&window, PAGE_EXPR, Duration::from_secs(3))? else {
+            continue;
+        };
+        let host = text_field(&page, "host").unwrap_or("");
+        let path = text_field(&page, "path").unwrap_or("");
+        let ready = text_field(&page, "ready").unwrap_or("");
+        if host == "www.12306.cn" {
+            let _ = window.eval(&format!("location.href = '{ORDER_PAGE}';"));
+            sleep_ms(800);
+            continue;
+        }
+        if host == "kyfw.12306.cn" && path.contains("train_order") && ready == "complete" {
+            // 等订单页自己的脚本把会话用起来，再发查询。
+            sleep_ms(600);
+            return Ok(());
+        }
+    }
+}
+
+fn collect_tickets(app: &tauri::AppHandle, on_status: &Channel<String>) -> Result<Value, String> {
+    let _ = on_status.send("已登录，正在读取订单…".to_string());
+    let deadline = Instant::now() + Duration::from_secs(5 * 60);
+    let mut started = false;
+    let mut last_progress = String::new();
+    loop {
+        if Instant::now() > deadline {
+            return Err("读取订单超时，请稍后重试".into());
+        }
+        let window = window_alive(app)?;
+        inject_bridge(&window);
+        if !started {
+            let start = try_eval_json(&window, START_COLLECT_EXPR, Duration::from_secs(4))?;
+            match start.as_ref().and_then(|value| text_field(value, "state")) {
+                Some("missing") | None => {
+                    sleep_ms(500);
+                    continue;
+                }
+                _ => started = true,
+            }
+        }
+        sleep_ms(500);
+        let window = window_alive(app)?;
+        let Some(status) = try_eval_json(&window, COLLECT_EXPR, Duration::from_secs(8))? else {
+            continue;
+        };
+        if let Some(progress) = text_field(&status, "progress") {
+            if !progress.is_empty() && progress != last_progress {
+                last_progress = progress.to_string();
+                let _ = on_status.send(last_progress.clone());
+            }
+        }
+        match text_field(&status, "state") {
+            Some("done") => {
+                let result = status.get("result").cloned().unwrap_or(Value::Null);
+                if result.get("ok").and_then(Value::as_bool) == Some(true) {
+                    let tickets = result.get("tickets").cloned().unwrap_or_else(|| json!([]));
+                    let count = tickets.as_array().map(Vec::len).unwrap_or(0);
+                    let _ = on_status.send(format!("已从 12306 读取 {count} 条车票"));
+                    return Ok(tickets);
+                }
+                let error = result
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("读取订单失败");
+                return Err(error.to_string());
+            }
+            Some("missing") | Some("idle") => started = false,
+            _ => {}
+        }
+    }
+}
+
+/// 打开（或复用）12306 窗口，等用户自行登录后打开订单页并同源拉取行程。
 #[tauri::command]
 pub async fn sync_12306_orders(
     app: tauri::AppHandle,
@@ -80,104 +228,15 @@ pub async fn sync_12306_orders(
     tauri::async_runtime::spawn_blocking(move || {
         let _ = on_status.send("正在打开 12306 登录窗口…".to_string());
         let window = ensure_window(&app)?;
-        // 登录页若在 www 域，cookie 不会带到 kyfw，强制回到 kyfw。
+        // 停在 www 时 cookie 到不了 kyfw 的订单接口，拉回登录页，已登录会被 12306 自己转走。
         let _ = window.eval(
             "if (location.hostname && location.hostname !== 'kyfw.12306.cn') { location.href = 'https://kyfw.12306.cn/otn/resources/login.html'; }",
         );
         sleep_ms(600);
-        let _ = window.eval(BRIDGE);
-
-        let _ = on_status.send("请在弹出的窗口中登录 12306（账号不会保存到火车记）".to_string());
-        let login_deadline = Instant::now() + Duration::from_secs(10 * 60);
-        loop {
-            let window = window_alive(&app)?;
-            if Instant::now() > login_deadline {
-                return Err("等待登录超时。登录完成后请再点一次同步。".into());
-            }
-            let _ = window.eval(BRIDGE);
-            let started = eval_json(
-                &window,
-                "window.__rfBridge ? window.__rfBridge.startLoginCheck() : {state:'missing'}",
-                Duration::from_secs(8),
-            )?;
-            if text_field(&started, "state") == Some("missing") {
-                sleep_ms(700);
-                continue;
-            }
-            loop {
-                sleep_ms(400);
-                let window = window_alive(&app)?;
-                let status = eval_json(
-                    &window,
-                    "window.__rfBridge ? window.__rfBridge.loginStatus() : {state:'missing'}",
-                    Duration::from_secs(8),
-                )?;
-                match text_field(&status, "state") {
-                    Some("done") => break,
-                    Some("missing") | Some("idle") => break,
-                    _ => continue,
-                }
-            }
-            let window = window_alive(&app)?;
-            let confirm = eval_json(
-                &window,
-                "window.__rfBridge ? window.__rfBridge.loginStatus() : {state:'missing'}",
-                Duration::from_secs(8),
-            )?;
-            if confirm.get("loggedIn").and_then(Value::as_bool) == Some(true) {
-                break;
-            }
-            sleep_ms(1200);
-        }
-
-        let window = window_alive(&app)?;
-        let _ = on_status.send("已登录，正在读取订单…".to_string());
-        let _ = window.eval(BRIDGE);
-        let started = eval_json(
-            &window,
-            "window.__rfBridge ? window.__rfBridge.startCollect() : {state:'missing'}",
-            Duration::from_secs(8),
-        )?;
-        if text_field(&started, "state") == Some("missing") {
-            return Err("无法在 12306 页面注入读取脚本，请关闭窗口后重试".into());
-        }
-
-        let collect_deadline = Instant::now() + Duration::from_secs(5 * 60);
-        loop {
-            if Instant::now() > collect_deadline {
-                return Err("读取订单超时，请稍后重试".into());
-            }
-            sleep_ms(500);
-            let window = window_alive(&app)?;
-            let status = eval_json(
-                &window,
-                "window.__rfBridge ? window.__rfBridge.collectStatus() : {state:'missing'}",
-                Duration::from_secs(8),
-            )?;
-            if let Some(progress) = text_field(&status, "progress") {
-                if !progress.is_empty() {
-                    let _ = on_status.send(progress.to_string());
-                }
-            }
-            match text_field(&status, "state") {
-                Some("done") => {
-                    let result = status.get("result").cloned().unwrap_or(Value::Null);
-                    if result.get("ok").and_then(Value::as_bool) == Some(true) {
-                        let tickets = result.get("tickets").cloned().unwrap_or_else(|| json!([]));
-                        let count = tickets.as_array().map(Vec::len).unwrap_or(0);
-                        let _ = on_status.send(format!("已从 12306 读取 {count} 条车票"));
-                        return Ok(tickets);
-                    }
-                    let error = result
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("读取订单失败");
-                    return Err(error.to_string());
-                }
-                Some("missing") => return Err("12306 页面已跳转，读取中断，请再点一次同步".into()),
-                _ => continue,
-            }
-        }
+        inject_bridge(&window);
+        wait_for_login(&app, &on_status)?;
+        open_order_page(&app, &on_status)?;
+        collect_tickets(&app, &on_status)
     })
     .await
     .map_err(|err| err.to_string())?

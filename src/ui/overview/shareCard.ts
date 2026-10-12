@@ -1,5 +1,6 @@
 import type { DurationSegment } from "../../domain/duration";
 import type { Station, Trip } from "../../domain/types";
+import type { MapGranularity } from "../../map/buildLayers";
 import type { OverviewStats } from "../../stats/summarize";
 import { echarts } from "../charts/echarts";
 import { buildTripMapOption, ensureChinaMap } from "../map/tripMapChart";
@@ -32,7 +33,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-async function renderMapImage(trips: Trip[], stations: Station[]): Promise<HTMLImageElement> {
+async function renderMapImage(
+  trips: Trip[],
+  stations: Station[],
+  granularity: MapGranularity,
+): Promise<HTMLImageElement> {
   await ensureChinaMap();
   const host = document.createElement("div");
   host.style.cssText = `width:${SHARE_WIDTH}px;height:${MAP_HEIGHT}px;position:fixed;left:-99999px;top:0;`;
@@ -41,7 +46,10 @@ async function renderMapImage(trips: Trip[], stations: Station[]): Promise<HTMLI
   const chart = echarts.init(host, undefined, { renderer: "canvas", devicePixelRatio: 1 });
   try {
     const finished = waitForChartFinished(chart);
-    chart.setOption(buildTripMapOption(trips, stations, { share: true, roam: false }), { notMerge: true });
+    chart.setOption(
+      buildTripMapOption(trips, stations, { granularity, share: true, roam: false }),
+      { notMerge: true },
+    );
     await finished;
     await new Promise<void>((resolve) => {
       window.setTimeout(resolve, 80);
@@ -172,8 +180,9 @@ export async function renderShareCard(
   trips: Trip[],
   stations: Station[],
   stats: OverviewStats,
+  granularity: MapGranularity,
 ): Promise<Blob> {
-  const mapImage = await renderMapImage(trips, stations);
+  const mapImage = await renderMapImage(trips, stations, granularity);
   const canvas = document.createElement("canvas");
   canvas.width = SHARE_WIDTH;
   canvas.height = SHARE_HEIGHT;

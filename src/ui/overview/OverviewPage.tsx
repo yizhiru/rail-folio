@@ -1,13 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { isTauri, writeBinaryFile } from "../../data/repository";
+import { formatDateCn } from "../../domain/dateLabel";
+import { formatTicketPrice } from "../../domain/price";
 import { TRAIN_CATEGORY_LABEL, type Station, type Trip } from "../../domain/types";
-import { CATEGORY_COLORS } from "../../map/buildLayers";
+import { CATEGORY_COLORS } from "../charts/categoryColors";
 import { summarizeTrips, type OverviewStats } from "../../stats/summarize";
 import { EChart } from "../charts/EChart";
 import type { EChartsOption } from "../charts/echarts";
+import { ActionMenu } from "../ActionMenu";
 import { DurationValue } from "../DurationValue";
+import { IconImage } from "../navIcons";
 import { TripMap } from "../map/TripMap";
+import { useMapGranularity } from "../map/useMapGranularity";
+import {
+  buildYearCountOption,
+  buildYearSpendOption,
+  hasYearSpend,
+  spendSummary,
+  yearWindow,
+} from "./yearChart";
 import { ShareCardDialog } from "./ShareCardDialog";
 import { copyImageBlob, downloadBlob, renderShareCard } from "./shareCard";
 
@@ -17,35 +29,41 @@ type Props = {
   onLoadDemo: () => void;
 };
 
+type HighlightTrip = { date: string; trainNo: string; fromName: string; toName: string };
+
+/** 最贵 / 最长一程：主数字一行；下面一行是「起点 → 终点」加灰色的「日期 · 车次」。 */
+function HighlightCard({
+  label,
+  value,
+  trip,
+}: {
+  label: string;
+  value: ReactNode;
+  trip?: HighlightTrip;
+}) {
+  return (
+    <article className="card">
+      <div className="label">{label}</div>
+      {value}
+      {trip ? (
+        <div className="highlight">
+          <div className="route">
+            {trip.fromName} → {trip.toName}
+          </div>
+          <div className="meta">
+            {formatDateCn(trip.date)} · {trip.trainNo}
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 function buildOptions(stats: OverviewStats) {
-  const yearOption: EChartsOption = {
-    backgroundColor: "transparent",
-    textStyle: { color: "#9aa6b5" },
-    tooltip: { trigger: "axis" },
-    grid: { left: 28, right: 10, top: 20, bottom: 24 },
-    xAxis: {
-      type: "category",
-      data: stats.byYear.map((item) => item.year),
-      axisLine: { lineStyle: { color: "#2a3544" } },
-    },
-    yAxis: {
-      type: "value",
-      minInterval: 1,
-      splitLine: { lineStyle: { color: "#2a3544" } },
-    },
-    series: [
-      {
-        type: "bar",
-        data: stats.byYear.map((item) => item.count),
-        itemStyle: { color: "#6ea8c9", borderRadius: [6, 6, 0, 0] },
-      },
-    ],
-  };
-
   const pieOption: EChartsOption = {
     backgroundColor: "transparent",
     tooltip: { trigger: "item" },
@@ -99,12 +117,19 @@ function buildOptions(stats: OverviewStats) {
     ],
   };
 
-  return { yearOption, pieOption, cityOption };
+  return { pieOption, cityOption };
 }
 
 export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
   const stats = useMemo(() => summarizeTrips(trips, stations), [trips, stations]);
-  const { yearOption, pieOption, cityOption } = useMemo(() => buildOptions(stats), [stats]);
+  const [granularity, setGranularity] = useMapGranularity();
+  const { pieOption, cityOption } = useMemo(() => buildOptions(stats), [stats]);
+  // 年度两张图共用一个年份窗口：最近 16 年，更早的往前翻。
+  const [yearPage, setYearPage] = useState(0);
+  const yearView = useMemo(() => yearWindow(stats.byYear, yearPage), [stats.byYear, yearPage]);
+  const yearCountOption = useMemo(() => buildYearCountOption(yearView.years), [yearView.years]);
+  const spendLabel = spendSummary(stats.totalTicketPrice, stats.pricedTripCount);
+  const yearSpendOption = useMemo(() => buildYearSpendOption(yearView.years), [yearView.years]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const shareBlobRef = useRef<Blob | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
@@ -131,7 +156,7 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
     setShareError(null);
     setShareNotice(null);
     try {
-      const blob = await renderShareCard(trips, stations, stats);
+      const blob = await renderShareCard(trips, stations, stats, granularity);
       if (!mountedRef.current) return;
       shareBlobRef.current = blob;
       setShareUrl((current) => {
@@ -214,11 +239,11 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
           <div className="value">{stats.cityCount}</div>
         </article>
         <article className="card">
-          <div className="label">乘车总时长</div>
+          <div className="label">乘车时长</div>
           <DurationValue minutes={stats.totalMinutes} />
         </article>
         <article className="card">
-          <div className="label">票价合计</div>
+          <div className="label">总花费</div>
           <div className="value value-compact">{stats.ticketPriceLabel}</div>
           {stats.pricedTripCount > 0 && stats.pricedTripCount < stats.tripCount ? (
             <div className="hint">已填 {stats.pricedTripCount} 条</div>
@@ -227,22 +252,77 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
       </div>
 
       <div className="card map-wrap">
-        <div className="map-toolbar">
-          <button className="btn" type="button" onClick={() => void generateShare()} disabled={shareBusy}>
-            {shareBusy ? "生成中…" : "生成分享图片"}
-          </button>
-        </div>
-        <TripMap trips={trips} stations={stations} />
+        <TripMap
+          trips={trips}
+          stations={stations}
+          granularity={granularity}
+          onGranularityChange={setGranularity}
+          actions={
+            <ActionMenu
+              busy={shareBusy}
+              items={[
+                {
+                  id: "share",
+                  label: shareBusy ? "生成中…" : "生成分享图片",
+                  icon: <IconImage />,
+                  disabled: shareBusy,
+                  onSelect: () => void generateShare(),
+                },
+              ]}
+            />
+          }
+        />
       </div>
       {shareError && !shareUrl ? <div className="notice">{shareError}</div> : null}
 
-      <div className="grid-4">
+      <div className="grid-years">
+        <article className="card">
+          <div className="card-head year-head">
+            <div className="label">年度出行</div>
+            {yearView.pageCount > 1 ? (
+              <div className="pager" role="group" aria-label="年份范围">
+                <button
+                  type="button"
+                  aria-label="更早的年份"
+                  disabled={!yearView.hasOlder}
+                  onClick={() => setYearPage(yearView.page + 1)}
+                >
+                  ‹
+                </button>
+                <span>{yearView.label}</span>
+                <button
+                  type="button"
+                  aria-label="更近的年份"
+                  disabled={!yearView.hasNewer}
+                  onClick={() => setYearPage(yearView.page - 1)}
+                >
+                  ›
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <EChart option={yearCountOption} className="chart-wrap" />
+        </article>
+        <article className="card">
+          <div className="card-head year-head">
+            <div className="label">年度花费</div>
+            {spendLabel ? <div className="hint">{spendLabel}</div> : null}
+          </div>
+          {hasYearSpend(stats.byYear) ? (
+            <EChart option={yearSpendOption} className="chart-wrap" />
+          ) : (
+            <div className="muted chart-empty">还没有填写票价的行程</div>
+          )}
+        </article>
+      </div>
+
+      <div className="grid-3">
         <article className="card">
           <div className="label">车型占比</div>
           <EChart option={pieOption} className="chart-wrap" />
         </article>
         <article className="card">
-          <div className="label">往来城市</div>
+          <div className="label">常去城市</div>
           <EChart option={cityOption} className="chart-wrap" />
         </article>
         <article className="card stack">
@@ -268,10 +348,22 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
             </table>
           </div>
         </article>
-        <article className="card">
-          <div className="label">年度出行</div>
-          <EChart option={yearOption} className="chart-wrap" />
-        </article>
+      </div>
+      <div className="cards cards-2">
+        <HighlightCard
+          label="最贵一程"
+          value={
+            <div className="value value-compact">
+              {stats.maxPriceTrip ? formatTicketPrice(stats.maxPriceTrip.ticketPrice) : "—"}
+            </div>
+          }
+          trip={stats.maxPriceTrip}
+        />
+        <HighlightCard
+          label="最长一程"
+          value={<DurationValue minutes={stats.longestTrip ? stats.longestTrip.minutes : null} />}
+          trip={stats.longestTrip}
+        />
       </div>
       {shareUrl ? (
         <ShareCardDialog

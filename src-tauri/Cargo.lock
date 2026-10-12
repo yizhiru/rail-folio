@@ -2819,7 +2819,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rail-folio"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "objc2",
  "objc2-foundation",

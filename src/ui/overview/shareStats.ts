@@ -20,7 +20,7 @@ export function shareFooterStats(
       duration: durationSegments(stats.totalMinutes),
     },
     {
-      label: "票价合计",
+      label: "总花费",
       value: stats.pricedTripCount > 0 ? compactTicketPrice(stats.totalTicketPrice) : "—",
     },
   ];

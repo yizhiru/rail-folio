@@ -59,6 +59,8 @@ export type Trip = {
   toStationId: string;
   departureTime?: string;
   arrivalTime?: string;
+  /** 到达日期相对出发日期的天数；缺省沿用旧档案的时刻推断。 */
+  arrivalDayOffset?: number;
   seatClass?: string;
   /** 实付票价，单位元；未填则不计入总览合计。 */
   ticketPrice?: number;
@@ -83,7 +85,7 @@ export type TripDraft = {
   duplicateOf?: string;
 };
 
-export const ARCHIVE_VERSION = 3;
+export const ARCHIVE_VERSION = 4;
 
 export type Archive = {
   version: typeof ARCHIVE_VERSION;

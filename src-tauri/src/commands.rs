@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
@@ -35,14 +36,21 @@ fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("非法路径：{}", path.display()))?;
-    let tmp = path.with_file_name(format!("{file_name}.tmp"));
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_file_name(format!("{file_name}.{}.{}.tmp", std::process::id(), nonce));
+    let mut created = false;
     let result = (|| -> std::io::Result<()> {
-        let mut file = fs::File::create(&tmp)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        created = true;
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
         fs::rename(&tmp, path)
     })();
-    if result.is_err() {
+    if result.is_err() && created {
         let _ = fs::remove_file(&tmp);
     }
     result.map_err(|e| e.to_string())
@@ -65,17 +73,36 @@ pub async fn save_archive(app: tauri::AppHandle, json: String) -> Result<(), Str
 
 /// 档案损坏时把原文件改名保留，返回备份路径；前端随后从空档案开始。
 #[tauri::command]
-pub async fn backup_archive(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn backup_archive(
+    app: tauri::AppHandle,
+    preserve: Option<bool>,
+) -> Result<String, String> {
     let path = archive_path(&app)?;
     if !path.exists() {
         return Ok(String::new());
     }
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let backup = path.with_file_name(format!("trips.corrupt-{stamp}.json"));
-    fs::rename(&path, &backup).map_err(|e| e.to_string())?;
+    let kind = if preserve.unwrap_or(false) {
+        "before-migration"
+    } else {
+        "corrupt"
+    };
+    let backup = path.with_file_name(format!("trips.{kind}-{stamp}.json"));
+    if preserve.unwrap_or(false) {
+        let mut source = fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut dest = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)
+            .map_err(|e| e.to_string())?;
+        std::io::copy(&mut source, &mut dest).map_err(|e| e.to_string())?;
+        dest.sync_all().map_err(|e| e.to_string())?;
+    } else {
+        fs::rename(&path, &backup).map_err(|e| e.to_string())?;
+    }
     Ok(backup.to_string_lossy().into_owned())
 }
 
@@ -213,8 +240,11 @@ mod macos_ocr {
         request.setRecognitionLanguages(&languages);
 
         let options: Retained<NSDictionary<VNImageOption, AnyObject>> = NSDictionary::new();
-        let handler =
-            VNImageRequestHandler::initWithData_options(VNImageRequestHandler::alloc(), &data, &options);
+        let handler = VNImageRequestHandler::initWithData_options(
+            VNImageRequestHandler::alloc(),
+            &data,
+            &options,
+        );
 
         let requests = NSArray::<VNRequest>::from_slice(&[request.as_ref()]);
         handler
@@ -233,5 +263,69 @@ mod macos_ocr {
             }
         }
         Ok(lines.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "rail-folio-test-{}-{stamp}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn atomic_write_replaces_complete_archive_and_leaves_no_temp() {
+        let dir = TempDir::new();
+        let path = dir.0.join("trips.json");
+        write_atomic(&path, "old").unwrap();
+        write_atomic(&path, "new complete archive").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new complete archive");
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_rename_preserves_destination_and_removes_temp() {
+        let dir = TempDir::new();
+        let path = dir.0.join("trips.json");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("original"), "keep").unwrap();
+        assert!(write_atomic(&path, "replacement").is_err());
+        assert_eq!(fs::read_to_string(path.join("original")).unwrap(), "keep");
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn concurrent_writes_never_share_a_temp_file() {
+        let dir = TempDir::new();
+        let path = dir.0.join("trips.json");
+        let a = "a".repeat(8192);
+        let b = "b".repeat(8192);
+        std::thread::scope(|scope| {
+            scope.spawn(|| write_atomic(&path, &a).unwrap());
+            scope.spawn(|| write_atomic(&path, &b).unwrap());
+        });
+        let result = fs::read_to_string(&path).unwrap();
+        assert!(result == a || result == b);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
     }
 }

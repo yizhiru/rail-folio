@@ -19,6 +19,8 @@ export function IngestPage({ ingest }: Props) {
     message,
     pickImages,
     pickFolder,
+    passengerName,
+    setPassengerName,
     syncFrom12306,
     updateDraft,
     removeDraft,
@@ -53,7 +55,19 @@ export function IngestPage({ ingest }: Props) {
         <article className="card stack">
           <div className="label">12306 同步</div>
           <div className="toolbar">
-            <button className="btn" type="button" onClick={() => void syncFrom12306()} disabled={busy}>
+            <input
+              placeholder="乘车人姓名"
+              aria-label="乘车人姓名"
+              value={passengerName}
+              onChange={(e) => setPassengerName(e.target.value)}
+              disabled={busy}
+            />
+            <button
+              className="btn"
+              type="button"
+              onClick={() => void syncFrom12306()}
+              disabled={busy || !passengerName.trim()}
+            >
               {busy ? "同步中…" : "从 12306 同步"}
             </button>
           </div>
@@ -89,6 +103,7 @@ export function IngestPage({ ingest }: Props) {
                 <th>到达站</th>
                 <th>出发时刻</th>
                 <th>到达时刻</th>
+                <th>跨日天数</th>
                 <th>票价</th>
                 <th>识别文本</th>
                 <th />
@@ -166,6 +181,12 @@ export function IngestPage({ ingest }: Props) {
                       value={draft.parsed.arrivalTime ?? ""}
                       onChange={(e) => updateDraft(draft.id, { arrivalTime: e.target.value })}
                     />
+                  </td>
+                  <td>
+                    <input className="time-input" type="number" min={0} max={30} step={1}
+                      aria-label="跨日天数" placeholder="自动"
+                      value={draft.parsed.arrivalDayOffset ?? ""}
+                      onChange={(e) => updateDraft(draft.id, { arrivalDayOffset: e.target.value === "" ? undefined : Number(e.target.value) })} />
                   </td>
                   <td>
                     <input

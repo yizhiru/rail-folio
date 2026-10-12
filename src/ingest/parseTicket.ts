@@ -110,6 +110,14 @@ function parseTimes(text: string): { departureTime?: string; arrivalTime?: strin
   return { departureTime, arrivalTime };
 }
 
+function parseDayOffset(text: string): number | undefined {
+  const explicit = /(?:到达|到站|跨日)\s*\+?(\d{1,2})\s*天/.exec(text);
+  if (explicit) return Number(explicit[1]);
+  if (/第三天|后天/.test(text)) return 2;
+  if (/次日|翌日/.test(text)) return 1;
+  return undefined;
+}
+
 export function parseTicketText(
   rawText: string,
   stations: Station[],
@@ -137,6 +145,7 @@ export function parseTicketText(
     toName: pair.toName,
     departureTime: times.departureTime,
     arrivalTime: times.arrivalTime,
+    arrivalDayOffset: parseDayOffset(compact),
     seatClass: seat,
     ticketPrice: parseTicketPriceFromText(compact),
     source,

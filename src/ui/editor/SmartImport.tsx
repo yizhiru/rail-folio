@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { parseTicketPrice } from "../../domain/price";
 import type { Station, Trip, TripDraft, TripInput } from "../../domain/types";
 import { draftsFromSmartText, tripInputsFromDrafts } from "../../ingest/fromSmartText";
@@ -12,7 +12,7 @@ D2282 杭州东 厦门北 2024-05-02 09:00 14:20`;
 type DraftPatch = Partial<
   Pick<
     TripDraft["parsed"],
-    "date" | "trainNo" | "fromName" | "toName" | "departureTime" | "arrivalTime" | "seatClass" | "ticketPrice"
+    "date" | "trainNo" | "fromName" | "toName" | "departureTime" | "arrivalTime" | "arrivalDayOffset" | "seatClass" | "ticketPrice"
   >
 > & { selected?: boolean };
 
@@ -27,11 +27,13 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<TripDraft[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const selectedCount = drafts.filter((draft) => draft.selected).length;
   const allSelected = drafts.length > 0 && selectedCount === drafts.length;
 
   function patchDraft(id: string, patch: DraftPatch) {
+    if (savingRef.current) return;
     setDrafts((current) =>
       current.map((draft) => {
         if (draft.id !== id) return draft;
@@ -48,6 +50,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
   }
 
   function setAllSelected(selected: boolean) {
+    if (savingRef.current) return;
     setDrafts((current) => current.map((draft) => ({ ...draft, selected })));
   }
 
@@ -68,6 +71,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
   }
 
   async function importSelected() {
+    if (savingRef.current) return;
     const { inputs, importedIds, skippedDup, skippedIncomplete } = tripInputsFromDrafts(
       drafts,
       onEnsureStation,
@@ -81,6 +85,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
       setMessage(extras.length > 0 ? extras.join("，") : "请先勾选要导入的记录");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       const ok = await onImport(inputs);
@@ -102,6 +107,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
           : `已导入 ${inputs.length} 条`,
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -187,6 +193,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
                 <th>到达站</th>
                 <th>出发</th>
                 <th>到达</th>
+                <th>跨日天数</th>
                 <th>席别</th>
                 <th>票价</th>
                 <th />
@@ -250,6 +257,12 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
                     />
                   </td>
                   <td>
+                    <input className="time-input" type="number" min={0} max={30} step={1}
+                      aria-label="跨日天数" placeholder="自动"
+                      value={draft.parsed.arrivalDayOffset ?? ""}
+                      onChange={(e) => patchDraft(draft.id, { arrivalDayOffset: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                  </td>
+                  <td>
                     <input
                       value={draft.parsed.seatClass ?? ""}
                       onChange={(e) => patchDraft(draft.id, { seatClass: e.target.value })}
@@ -272,6 +285,7 @@ export function SmartImport({ stations, trips, onEnsureStation, onImport }: Prop
                     <button
                       className="btn danger"
                       type="button"
+                      disabled={saving}
                       onClick={() => setDrafts((current) => current.filter((item) => item.id !== draft.id))}
                     >
                       移除

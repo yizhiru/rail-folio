@@ -2,12 +2,13 @@ import { findDuplicate, tripFingerprint } from "./fingerprint";
 import type { Trip, TripDraft, TripInput } from "./types";
 
 export type TripFillSource = Partial<
-  Pick<Trip, "departureTime" | "arrivalTime" | "seatClass" | "ticketPrice" | "distanceKm" | "notes">
+  Pick<Trip, "departureTime" | "arrivalTime" | "arrivalDayOffset" | "seatClass" | "ticketPrice" | "distanceKm" | "notes">
 >;
 
 const FILL_KEYS = [
   "departureTime",
   "arrivalTime",
+  "arrivalDayOffset",
   "seatClass",
   "ticketPrice",
   "distanceKm",
@@ -56,6 +57,7 @@ export function tripInputFillSource(input: TripInput): TripFillSource {
   return {
     departureTime: input.departureTime,
     arrivalTime: input.arrivalTime,
+    arrivalDayOffset: input.arrivalDayOffset,
     seatClass: input.seatClass,
     ticketPrice: input.ticketPrice,
     distanceKm: input.distanceKm,

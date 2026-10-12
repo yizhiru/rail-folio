@@ -40,19 +40,10 @@ npm run package:mac
 
 ## 从 12306 同步
 
-导入页的「从 12306 同步」会弹出系统内嵌窗口打开 12306 登录页。你在窗口里自己登录（滑块、短信都走 12306 自己的流程），火车记不保存账号密码。登录成功后，程序在该窗口内请求未出行订单和近两年历史订单，结果进入导入核对列表，勾选后再入库。会话 cookie 留在应用的 WebView 里，下次同步若尚未过期可跳过登录。需要桌面应用（`npm run tauri dev`），浏览器预览模式不可用。
+导入页的「从 12306 同步」需要先填写乘车人姓名（同一订单里可能有多位乘车人，只同步这一位的车票；姓名只记在本机，下次自动带出）。点击后会弹出系统内嵌窗口打开 12306 登录页。你在窗口里自己登录（滑块、短信都走 12306 自己的流程），火车记不保存账号密码。登录成功后，程序打开订单页，按页面现在的条件读取未完成、未出行和历史订单里的行程（历史单次约 30 天，能继续往前查就接着查，超出保存期限就停），结果进入导入核对列表，勾选后再入库。会话 cookie 留在应用的 WebView 里，下次同步若尚未过期可跳过登录。需要桌面应用（`npm run tauri dev`），浏览器预览模式不可用。
 
 写入采用「临时文件 + 重命名」保证原子性；如果启动时发现 `trips.json` 无法解析，会把它改名为 `trips.corrupt-<时间戳>.json` 保留在同目录，再从空档案开始。
 
 ## 车站数据
 
 `src/assets/stations.json` 是 12306 全量车站表（3384 站，取自 `kyfw.12306.cn/otn/resources/js/framework/station_name.js`，2026-09），`id` 即电报码，`city` 直接沿用 12306 的城市字段（口径为地级市 / 直辖市 / 自治州，例如昆山南 → 苏州、义乌 → 金华）。经纬度以 OpenStreetMap 的 `railway=station` 节点为主（WGS84），OSM 缺失或同名歧义无法判断时退回 [pooobaby/train](https://github.com/pooobaby/train) / heywhale 车站坐标集；5 个站无坐标，约 20 个偏远小站坐标可能不准。同城车站的归并只看 `city` 字段，`cityFromStationName` 仅用于 OCR 识别出的、不在表里的站。
-
-## 里程数据
-
-`src/assets/mileage.json` 是全国铁路客运运价里程表（客里表）的线路里程，共 598 条线路、约 4800 个站点，每条线路给出各站的累计运价里程（km）。来源为 [CDK6182CHR/qETRC](https://github.com/CDK6182CHR/qETRC) 随仓库分发的 `CRPassengerMileage.pyetlib`（数据版本 20210928，由 @江教授 维护），仅做了字段精简。站名以 `*` 结尾的是线路所 / 接算点，不是客运车站。2021 年 9 月之后开通的线路不在其中。
-
-原始文件放在 `data/`（已 gitignore，不入库）：
-
-- `CRPassengerMileage.pyetlib`：上述 qETRC 原始线路数据库（pyETRC/qETRC 的 JSON 格式）。
-- `PriceCpp-adj.txt`：[CDK6182CHR/PriceCpp](https://github.com/CDK6182CHR/PriceCpp) 的客里表邻接表，格式为 `线名 起点 终点 区间里程`，版本更早，仅作对照。

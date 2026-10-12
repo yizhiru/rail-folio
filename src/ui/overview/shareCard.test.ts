@@ -22,7 +22,7 @@ describe("shareFooterStats", () => {
           { amount: 5, unit: "min" },
         ],
       },
-      { label: "票价合计", value: "553.5元" },
+      { label: "总花费", value: "553.5元" },
     ]);
   });
 });

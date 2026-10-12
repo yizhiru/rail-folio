@@ -1,3 +1,4 @@
+import { isValidDayOffset } from "./tripValidation";
 import type { Trip } from "./types";
 
 function timeToMinutes(value: string): number | undefined {
@@ -9,25 +10,26 @@ function timeToMinutes(value: string): number | undefined {
   return hours * 60 + minutes;
 }
 
-/**
- * 档案只存 HH:mm。到达钟点不晚于出发时视为次日到达。
- * 跨两天及以上无法从时刻本身区分，仍按跨一天计。
- */
+/** 明确天数优先；旧档案缺少天数时按时刻推断。 */
+export function arrivalDayOffset(trip: Pick<Trip, "departureTime" | "arrivalTime" | "arrivalDayOffset">): number {
+  if (isValidDayOffset(trip.arrivalDayOffset)) return trip.arrivalDayOffset;
+  return isNextDayArrival(trip.departureTime, trip.arrivalTime) ? 1 : 0;
+}
+
 export function isNextDayArrival(departureTime?: string, arrivalTime?: string): boolean {
   const departure = departureTime ? timeToMinutes(departureTime) : undefined;
   const arrival = arrivalTime ? timeToMinutes(arrivalTime) : undefined;
-  if (departure == null || arrival == null) return false;
-  return arrival <= departure;
+  return departure != null && arrival != null && arrival <= departure;
 }
 
-/** 只按开车与到达时刻计算。缺任一时刻则不计入总时长。 */
+/** 同时有出发和到达时刻才计入总时长。 */
 export function tripDurationMin(trip: Trip): { minutes: number } | undefined {
   const departure = trip.departureTime ? timeToMinutes(trip.departureTime) : undefined;
   const arrival = trip.arrivalTime ? timeToMinutes(trip.arrivalTime) : undefined;
   if (departure == null || arrival == null) return undefined;
-  let minutes = arrival - departure;
-  if (isNextDayArrival(trip.departureTime, trip.arrivalTime)) minutes += 24 * 60;
-  return { minutes };
+  if (trip.arrivalDayOffset != null && !isValidDayOffset(trip.arrivalDayOffset)) return undefined;
+  const minutes = arrival - departure + arrivalDayOffset(trip) * 24 * 60;
+  return minutes >= 0 ? { minutes } : undefined;
 }
 
 /** 展示精确到分钟，不折成天。整小时不写 0 min。 */

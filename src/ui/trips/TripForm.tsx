@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { isNextDayArrival } from "../../domain/duration";
+import { isValidDate, isValidTime, isValidDayOffset } from "../../domain/tripValidation";
+import { useRef, useState } from "react";
+import { arrivalDayOffset } from "../../domain/duration";
 import { parseTicketPrice } from "../../domain/price";
 import { SEAT_CLASSES, type Station, type Trip, type TripInput, type TripSource } from "../../domain/types";
 import { STATION_DATALIST_ID } from "../StationDatalist";
@@ -11,6 +12,7 @@ export type TripFormValues = {
   toName: string;
   departureTime: string;
   arrivalTime: string;
+  arrivalDayOffset: string;
   seatClass: string;
   ticketPrice: string;
   distanceKm: string;
@@ -24,13 +26,14 @@ export const EMPTY_TRIP_FORM: TripFormValues = {
   toName: "",
   departureTime: "",
   arrivalTime: "",
+  arrivalDayOffset: "",
   seatClass: "",
   ticketPrice: "",
   distanceKm: "",
   notes: "",
 };
 
-const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
+
 
 type Props = {
   initial?: Partial<TripFormValues>;
@@ -48,6 +51,7 @@ export function tripToFormValues(trip: Trip, stationName: (id: string) => string
     toName: stationName(trip.toStationId),
     departureTime: trip.departureTime ?? "",
     arrivalTime: trip.arrivalTime ?? "",
+    arrivalDayOffset: trip.arrivalDayOffset == null ? "" : String(trip.arrivalDayOffset),
     seatClass: trip.seatClass ?? "",
     ticketPrice: trip.ticketPrice != null ? String(trip.ticketPrice) : "",
     distanceKm: trip.distanceKm != null ? String(trip.distanceKm) : "",
@@ -71,6 +75,7 @@ export function formValuesToTripInput(
     toStationId: to.id,
     departureTime: values.departureTime.trim() || undefined,
     arrivalTime: values.arrivalTime.trim() || undefined,
+    arrivalDayOffset: values.arrivalDayOffset === "" ? undefined : Number(values.arrivalDayOffset),
     seatClass: values.seatClass || undefined,
     ticketPrice: parseTicketPrice(values.ticketPrice),
     distanceKm: values.distanceKm && distance > 0 ? distance : undefined,
@@ -83,10 +88,16 @@ export function validateTripForm(values: TripFormValues): string | null {
   if (!values.date || !values.trainNo.trim() || !values.fromName.trim() || !values.toName.trim()) {
     return "日期、车次、出发站、到达站为必填";
   }
-  if (values.departureTime && !TIME_PATTERN.test(values.departureTime.trim())) {
+  if (!isValidDate(values.date)) return "日期无效";
+  if (values.arrivalDayOffset !== "" && !isValidDayOffset(Number(values.arrivalDayOffset))) return "跨日天数应为 0–30 的整数";
+  if (values.arrivalDayOffset === "0" && values.departureTime && values.arrivalTime) {
+    const minutes = (time: string) => time.split(":").reduce((h, m) => h * 60 + Number(m), 0);
+    if (minutes(values.arrivalTime) < minutes(values.departureTime)) return "当天到达时，到达时刻不能早于出发时刻";
+  }
+  if (values.departureTime && !isValidTime(values.departureTime.trim())) {
     return "出发时刻格式应为 HH:mm";
   }
-  if (values.arrivalTime && !TIME_PATTERN.test(values.arrivalTime.trim())) {
+  if (values.arrivalTime && !isValidTime(values.arrivalTime.trim())) {
     return "到达时刻格式应为 HH:mm";
   }
   if (values.distanceKm && !(Number(values.distanceKm) > 0)) {
@@ -101,6 +112,7 @@ export function validateTripForm(values: TripFormValues): string | null {
 export function TripForm({ initial, mode, onSubmit, onCancel }: Props) {
   const [values, setValues] = useState<TripFormValues>({ ...EMPTY_TRIP_FORM, ...initial });
   const [message, setMessage] = useState<string | null>(null);
+  const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
   const set = (key: keyof TripFormValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -108,11 +120,13 @@ export function TripForm({ initial, mode, onSubmit, onCancel }: Props) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (savingRef.current) return;
     const problem = validateTripForm(values);
     if (problem) {
       setMessage(problem);
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setMessage(null);
     try {
@@ -127,6 +141,7 @@ export function TripForm({ initial, mode, onSubmit, onCancel }: Props) {
           trainNo: "",
           departureTime: "",
           arrivalTime: "",
+          arrivalDayOffset: "",
           ticketPrice: "",
           distanceKm: "",
           notes: "",
@@ -136,10 +151,12 @@ export function TripForm({ initial, mode, onSubmit, onCancel }: Props) {
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
+  const days = arrivalDayOffset({ ...values, arrivalDayOffset: values.arrivalDayOffset === "" ? undefined : Number(values.arrivalDayOffset) });
   return (
     <form className="card form-grid" onSubmit={(e) => void submit(e)}>
       <label>
@@ -165,13 +182,17 @@ export function TripForm({ initial, mode, onSubmit, onCancel }: Props) {
       <label>
         <span>
           到达时刻
-          {isNextDayArrival(values.departureTime, values.arrivalTime) ? (
-            <span className="day-offset" title="次日到达">
-              +1
+          {days > 0 ? (
+            <span className="day-offset" title={`${days} 天后到达`}>
+              +{days}
             </span>
           ) : null}
         </span>
         <input value={values.arrivalTime} onChange={set("arrivalTime")} placeholder="12:00" />
+      </label>
+      <label>
+        跨日天数（选填）
+        <input type="number" min={0} max={30} step={1} value={values.arrivalDayOffset} onChange={set("arrivalDayOffset")} placeholder="留空按时刻推断；当天填 0" />
       </label>
       <label>
         席别

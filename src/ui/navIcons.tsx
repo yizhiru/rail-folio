@@ -47,6 +47,39 @@ export function IconIngest() {
   );
 }
 
+/** 更多：三个实心点。 */
+export function IconMore() {
+  return (
+    <Icon>
+      <circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** 导出图片：圆角画框里一座山和一个太阳。 */
+export function IconImage() {
+  return (
+    <Icon>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" strokeLinecap="round" strokeLinejoin="round" />
+    </Icon>
+  );
+}
+
+/** 导出备份：箭头向下，落入底边的托盘。 */
+export function IconExport() {
+  return (
+    <Icon>
+      <path d="M12 4v10" strokeLinecap="round" />
+      <path d="M8 10l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 16v2.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V16" strokeLinecap="round" />
+    </Icon>
+  );
+}
+
 export function IconEditor() {
   return (
     <Icon>

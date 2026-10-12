@@ -10,25 +10,46 @@
     return parts.join("&");
   }
 
+  function apiMessage(json) {
+    if (!json || typeof json !== "object") return "订单接口没有返回数据";
+    var msg = "";
+    if (Array.isArray(json.messages)) msg = json.messages.filter(Boolean).join("；");
+    else if (typeof json.messages === "string") msg = json.messages;
+    if (json.status === false) return msg || "查询订单失败";
+    if (msg && /登录|登陆/.test(msg)) return msg;
+    return "";
+  }
+
   function post(path, data) {
-    return fetch(path, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        Referer: location.href,
-      },
-      body: form(data),
-      credentials: "include",
-    }).then(function (res) {
-      return res.text().then(function (text) {
-        try {
-          return JSON.parse(text);
-        } catch (err) {
-          throw new Error("接口返回非 JSON，可能尚未登录或页面被拦截");
-        }
-      });
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        reject(new Error("请求超时"));
+      }, 20000);
+      fetch(path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "application/json, text/javascript, */*; q=0.01",
+        },
+        body: form(data),
+        credentials: "include",
+      }).then(
+        function (res) {
+          clearTimeout(timer);
+          res.text().then(function (text) {
+            try {
+              resolve(JSON.parse(text));
+            } catch (err) {
+              reject(new Error("接口返回非 JSON，可能尚未登录或页面被拦截"));
+            }
+          }, reject);
+        },
+        function (err) {
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
     });
   }
 
@@ -40,39 +61,48 @@
   }
 
   function addDays(date, days) {
-    var next = new Date(date.getTime());
+    var next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     next.setDate(next.getDate() + days);
     return next;
   }
 
+  function today() {
+    var now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
   function flatten(json) {
     var data = json && json.data;
-    if (!data) return [];
-    var orders =
-      data.OrderDTODataList ||
-      data.orderDTODataList ||
-      data.orderDBList ||
-      data.orderList ||
-      [];
+    if (!data || typeof data !== "object") return { tickets: [], orderCount: 0, total: null };
+    var orders = data.OrderDTODataList || data.orderDTODataList || data.orderDBList || data.orderList || [];
     if (!Array.isArray(orders)) orders = [];
+    var totalRaw = data.order_total_number != null ? data.order_total_number : data.orderTotalNumber;
+    var totalNum = Number(totalRaw);
+    var total = Number.isFinite(totalNum) ? totalNum : null;
     var out = [];
     orders.forEach(function (order) {
-      var tickets = (order && (order.tickets || order.myTicketList || order.ticketList)) || [];
-      if (!Array.isArray(tickets)) tickets = [];
-      tickets.forEach(function (ticket) {
+      var list = order && (order.tickets || order.myTicketList || order.ticketList);
+      if (!Array.isArray(list) || list.length === 0) {
+        if (
+          order &&
+          (order.stationTrainDTO || order.from_station_name || order.station_train_code || order.train_code)
+        ) {
+          list = [order];
+        } else {
+          list = [];
+        }
+      }
+      list.forEach(function (ticket) {
         var copy = Object.assign({}, ticket);
         copy.sequence_no = copy.sequence_no || (order && (order.sequence_no || order.sequenceNo));
         copy.order_date = copy.order_date || (order && order.order_date);
-        copy.ticket_price =
-          copy.ticket_price ||
-          copy.ticketPrice ||
-          copy.str_ticket_price_page ||
-          copy.ticket_price_page ||
-          (order && order.ticket_price);
+        if (!copy.str_ticket_price_page && order && order.str_ticket_price_page) {
+          copy.str_ticket_price_page = order.str_ticket_price_page;
+        }
         out.push(copy);
       });
     });
-    return out;
+    return { tickets: out, orderCount: orders.length, total: total };
   }
 
   function sleep(ms) {
@@ -81,77 +111,149 @@
     });
   }
 
-  async function paginate(where, extra) {
+  /** 与订单页一致：pageIndex 从 0 开始，每页 8 个订单。 */
+  async function queryOrders(where, queryType, start, end) {
     var pageIndex = 0;
     var all = [];
+    var seen = "";
     while (pageIndex < 40) {
-      var body = Object.assign(
-        {
-          come_from_flag: "my_order",
-          pageSize: "8",
-          pageIndex: String(pageIndex),
-          query_where: where,
-          sequeue_train_name: "",
-        },
-        extra || {},
-      );
-      var json = await post("/otn/queryOrder/queryMyOrder", body);
-      if (json && json.status === false) {
-        var msg = Array.isArray(json.messages) ? json.messages.join("；") : json.messages;
-        throw new Error(msg || "查询订单失败");
-      }
+      var json = await post("/otn/queryOrder/queryMyOrder", {
+        come_from_flag: "my_order",
+        pageSize: "8",
+        pageIndex: String(pageIndex),
+        query_where: where,
+        queryType: String(queryType),
+        queryStartDate: ymd(start),
+        queryEndDate: ymd(end),
+        sequeue_train_name: "",
+      });
+      var failure = apiMessage(json);
+      if (failure) throw new Error(failure);
       var batch = flatten(json);
-      all = all.concat(batch);
-      if (batch.length < 8) break;
+      var marker = "";
+      if (batch.tickets[0]) {
+        marker = [
+          batch.tickets[0].sequence_no || "",
+          batch.tickets[0].coach_no || "",
+          batch.tickets[0].seat_name || "",
+          batch.tickets[0].start_train_date_page || batch.tickets[0].train_date || "",
+        ].join("|");
+      }
+      if (marker && marker === seen) break;
+      seen = marker;
+      all = all.concat(batch.tickets);
+      if (batch.orderCount < 8) break;
+      if (batch.total != null && (pageIndex + 1) * 8 >= batch.total) break;
       pageIndex += 1;
       await sleep(200);
     }
     return all;
   }
 
+  async function readIncomplete() {
+    var json = await post("/otn/queryOrder/queryMyOrderNoComplete", { _json_att: "" });
+    if (apiMessage(json)) return [];
+    return flatten(json).tickets;
+  }
+
+  /**
+   * 订单页（train_order.html）的查询条件：
+   * 未出行按订票日期约近 30 天，再按乘车日期向后约 30 天；
+   * 历史订单按订票日期回溯，单次不超过页面允许的约 30 天。超出保存期限时接口会报错，到此为止，已读到的票保留。
+   */
   async function collectTickets(onProgress) {
-    onProgress("正在读取未完成订单…");
     var tickets = [];
+    var errors = [];
+    var sawOrderQuery = false;
+    var day = today();
+
+    function remember(err) {
+      errors.push(err && err.message ? err.message : String(err));
+    }
+
+    onProgress("正在读取未完成订单…");
     try {
-      var incomplete = await post("/otn/queryOrder/queryMyOrderNoComplete", { _json_att: "" });
-      tickets = tickets.concat(flatten(incomplete));
+      tickets = tickets.concat(await readIncomplete());
     } catch (_err) {
-      /* 无未完成订单时接口可能报错，忽略 */
+      /* 没有未完成订单时接口可能报错 */
     }
 
     onProgress("正在读取未出行订单…");
-    tickets = tickets.concat(await paginate("G"));
+    try {
+      tickets = tickets.concat(await queryOrders("G", "1", addDays(day, -29), day));
+      sawOrderQuery = true;
+    } catch (err) {
+      remember(err);
+    }
+    try {
+      tickets = tickets.concat(await queryOrders("G", "2", day, addDays(day, 29)));
+      sawOrderQuery = true;
+    } catch (err) {
+      remember(err);
+    }
 
-    var end = new Date();
+    var end = addDays(day, -1);
+    var emptyStreak = 0;
     for (var i = 0; i < 24; i++) {
       var start = addDays(end, -29);
       onProgress("正在读取历史订单 " + ymd(start) + " ~ " + ymd(end) + "…");
-      tickets = tickets.concat(
-        await paginate("H", {
-          queryType: "2",
-          queryStartDate: ymd(start),
-          queryEndDate: ymd(end),
-        }),
-      );
+      try {
+        var batch = await queryOrders("H", "1", start, end);
+        sawOrderQuery = true;
+        if (batch.length === 0) {
+          emptyStreak += 1;
+          if (emptyStreak >= 2) break;
+        } else {
+          emptyStreak = 0;
+          tickets = tickets.concat(batch);
+        }
+      } catch (err) {
+        remember(err);
+        break;
+      }
       end = addDays(start, -1);
       await sleep(250);
+    }
+
+    if (!sawOrderQuery && errors.length > 0) {
+      throw new Error(errors[0]);
     }
     return tickets;
   }
 
+  function loggedInFrom(user, conf) {
+    if (user && user.data && user.data.flag) return true;
+    var flag = conf && conf.data && conf.data.is_login;
+    return flag === "Y" || flag === true;
+  }
+
   window.__rfBridge = {
     startLoginCheck: function () {
-      if (window.__rfLogin && window.__rfLogin.running) return { state: "running" };
-      window.__rfLogin = { running: true, out: null };
-      post("/otn/login/checkUser", { _json_att: "" })
-        .then(function (json) {
-          window.__rfLogin.out = !!(json && json.data && json.data.flag);
+      var current = window.__rfLogin;
+      if (current && current.running && Date.now() - current.started < 20000) {
+        return { state: "running" };
+      }
+      var job = { running: true, out: null, started: Date.now() };
+      window.__rfLogin = job;
+      Promise.all([
+        post("/otn/login/checkUser", { _json_att: "" }).catch(function () {
+          return null;
+        }),
+        post("/otn/login/conf", { _json_att: "" }).catch(function () {
+          return null;
+        }),
+      ])
+        .then(function (pair) {
+          if (window.__rfLogin !== job) return;
+          job.out = loggedInFrom(pair[0], pair[1]);
         })
         .catch(function () {
-          window.__rfLogin.out = false;
+          if (window.__rfLogin !== job) return;
+          job.out = false;
         })
         .then(function () {
-          window.__rfLogin.running = false;
+          if (window.__rfLogin !== job) return;
+          job.running = false;
         });
       return { state: "started" };
     },
@@ -162,19 +264,26 @@
       return { state: "done", loggedIn: !!job.out };
     },
     startCollect: function () {
-      if (window.__rfJob && window.__rfJob.running) return { state: "running" };
-      window.__rfJob = { running: true, progress: "开始读取订单…", out: null };
+      var current = window.__rfJob;
+      if (current && current.running && Date.now() - current.started < 300000) {
+        return { state: "running" };
+      }
+      var job = { running: true, progress: "开始读取订单…", out: null, started: Date.now() };
+      window.__rfJob = job;
       collectTickets(function (text) {
-        if (window.__rfJob) window.__rfJob.progress = text;
+        if (window.__rfJob === job) job.progress = text;
       })
         .then(function (tickets) {
-          window.__rfJob.out = { ok: true, tickets: tickets };
+          if (window.__rfJob !== job) return;
+          job.out = { ok: true, tickets: tickets };
         })
         .catch(function (err) {
-          window.__rfJob.out = { ok: false, error: String(err && err.message ? err.message : err) };
+          if (window.__rfJob !== job) return;
+          job.out = { ok: false, error: String(err && err.message ? err.message : err) };
         })
         .then(function () {
-          window.__rfJob.running = false;
+          if (window.__rfJob !== job) return;
+          job.running = false;
         });
       return { state: "started" };
     },

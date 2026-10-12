@@ -140,6 +140,7 @@ export function tripInputsFromDrafts(
       toStationId: to.id,
       departureTime: draft.parsed.departureTime,
       arrivalTime: draft.parsed.arrivalTime,
+      arrivalDayOffset: draft.parsed.arrivalDayOffset,
       seatClass: draft.parsed.seatClass,
       ticketPrice: draft.parsed.ticketPrice,
       notes: draft.parsed.notes,

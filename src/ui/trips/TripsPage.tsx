@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
-import { isNextDayArrival } from "../../domain/duration";
+import { arrivalDayOffset } from "../../domain/duration";
 import { formatTicketPrice } from "../../domain/price";
 import { TRAIN_CATEGORIES, TRAIN_CATEGORY_LABEL } from "../../domain/types";
 import type { Station, TrainCategory, Trip, TripInput } from "../../domain/types";
+import { compareTripsRecentFirst } from "../../domain/sortTrips";
 import { formValuesToTripInput, TripForm, tripToFormValues } from "./TripForm";
 
 const SOURCE_LABEL: Record<Trip["source"], string> = {
@@ -52,7 +53,7 @@ export function TripsPage({ trips, stations, onDelete, onUpdate, onEnsureStation
         const blob = `${trip.trainNo}${stationName(trip.fromStationId)}${stationName(trip.toStationId)}`;
         return blob.includes(needle);
       })
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort(compareTripsRecentFirst);
   }, [trips, year, category, query, stationName]);
 
   return (
@@ -116,9 +117,9 @@ export function TripsPage({ trips, stations, onDelete, onUpdate, onEnsureStation
                   <td>{trip.departureTime ?? "—"}</td>
                   <td>
                     {trip.arrivalTime ?? "—"}
-                    {isNextDayArrival(trip.departureTime, trip.arrivalTime) ? (
-                      <span className="day-offset" title="次日到达">
-                        +1
+                    {arrivalDayOffset(trip) > 0 ? (
+                      <span className="day-offset" title={`${arrivalDayOffset(trip)} 天后到达`}>
+                        +{arrivalDayOffset(trip)}
                       </span>
                     ) : null}
                   </td>

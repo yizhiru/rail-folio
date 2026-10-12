@@ -36,12 +36,12 @@
 | 来源 | 用途 |
 |---|---|
 | 本机 `trips.json` 或浏览器 `localStorage` | 用户档案 |
-| `src/assets/stations.json` | 内置 12306 全量车站（电报码、城市、经纬度） |
+| `src/assets/stations.json` | 内置 12306 全量车站（电报码、城市、经纬度）。`city` 取地级市 / 直辖市；县级市、县、区的车站要写所属地级市（京山南 → 荆门），重庆各区县归重庆；省直辖县级市（仙桃、琼海等）和自治州 / 盟 / 地区内的车站沿用各自名称，不强并 |
 | `src/assets/china.geo.json` | 总览地图省界，按需动态加载 |
 | kyfw.12306.cn（用户自行登录） | 订单同步；应用不保存账号密码 |
 | OpenStreetMap / 第三方车站坐标集 | 生成车站经纬度时用过，运行时不再访问 |
 
-`src/assets/mileage.json` 是客里表精简数据，里程统计下线后代码不再引用。
+客里表与总里程统计已下线，来源与原始文件见 [deprecated.md](deprecated.md)。
 
 ## 运行形态
 
@@ -87,7 +87,7 @@ rail-folio/
 
 ## 核心数据
 
-档案版本当前为 **3**（`ARCHIVE_VERSION`）。读盘时 `normalizeArchive` 按版本迁移。
+档案版本当前为 **4**（`ARCHIVE_VERSION`）。读盘时 `normalizeArchive` 按版本迁移。v4 增加可选的 `arrivalDayOffset`（跨日天数，0–30 整数），旧记录未填时继续按时刻推断。
 
 ```ts
 Archive { version, trips: Trip[], customStations: Station[] }
@@ -101,13 +101,13 @@ Station { id /* 电报码 */, name, city, province?, lng?, lat? }
 - **城市**：优先用车站的 `city`（12306 地级市口径）；只有自定义站才用站名推导。
 - **来源** `ocr` | `12306-screenshot` | `12306` | `manual` | `json-import` | `demo`。
 
-写入：先写 `trips.json.tmp` 再 rename。JSON 损坏时把原文件改名为 `trips.corrupt-<时间戳>.json`，然后从空档案开始，避免覆盖用户数据。读盘失败则禁止整次运行写入。
+写入：先写带进程 ID 和序号的独立临时文件，再 rename。JSON 损坏时把原文件改名为 `trips.corrupt-<时间戳>.json`，然后从空档案开始。版本不兼容、部分记录异常（无效日期 / 时刻、重复 ID 等）或读盘失败时，保留原档案并禁止整次运行写入，不再静默丢弃记录。迁移或修正指纹前复制原始档案到 `trips.before-migration-<时间戳>.json`，备份失败则停止加载。
 
 ## 前端分层
 
 `App` 持有两份状态：
 
-- `useArchive`：档案的唯一写入入口；写盘串行排队。
+- `useArchive`：档案的唯一写入入口；`ArchiveWriter` 串行计算并写盘，成功后才发布内存快照。失败保持最后成功状态，重试重新写盘；自定义车站随引用它的行程一起保存。
 - `useIngest`：挂在 App 而不是导入页，切页签不会丢掉草稿。
 
 | 页 | 做什么 |
@@ -116,11 +116,11 @@ Station { id /* 电报码 */, name, city, province?, lng?, lat? }
 | 分析 | 按年切换地图与图表；车型饼图可切换次数 / 金额 |
 | 行程 | 列表、筛选、编辑、删除 |
 | 导入 | 图片 OCR、文件夹、拖放、12306 同步 → 核对表；确认入库仅在有草稿后出现 |
-| 录入 | 手工一条；导出备份 |
+| 录入 | 手工一条；智能导入 |
 
 导入草稿是 `TripDraft`：识别结果可改，勾选后才变成 `Trip`。12306 同步按指纹跳过档案里已有且无法补充空字段的行程，以及当前核对列表里已有的行。同一趟车再导入时，会补上当时缺少的票价、席别、时刻等。
 
-总时长只累计同时有开车与到达时刻的行程（`domain/duration.ts`），缺任一时刻则不计入；展示为 `11 h 11 min`，精确到分钟，不折成天。票价合计只累计填写了 `ticketPrice` 的行程。
+乘车时长只累计同时有开车与到达时刻的行程（`domain/duration.ts`），缺任一时刻则不计入；展示为 `11 h 11 min`，精确到分钟，不折成天。总花费只累计填写了 `ticketPrice` 的行程。
 
 ## Rust 命令
 
@@ -131,16 +131,21 @@ Station { id /* 电报码 */, name, city, province?, lng?, lat? }
 | `load_archive` / `save_archive` / `backup_archive` | 档案文件 |
 | `ocr_images` | 并行 OCR，每张完成通过 Channel 推前端 |
 | `list_images` | 目录下图片（深度 ≤ 2，最多 200 张） |
-| `read_text_file` / `write_text_file` | 读写用户选定的文本文件；录入页导出走 `write_text_file` |
+| `read_text_file` / `write_text_file` | 读写用户选定的文本文件；侧栏「导出」走 `write_text_file` |
 | `sync_12306_orders` | 打开或复用 12306 窗口，登录后同源拉单 |
 
 OCR 仅 macOS：Vision `VNRecognizeTextRequest`，语言 `zh-Hans` / `zh-Hant` / `en-US`。
 
-12306 同步：新建 WebView 加载 `kyfw.12306.cn` 登录页，用户在窗口内登录。注入脚本请求 `checkUser`、`queryMyOrder`（未出行 + 近两年历史）、`queryMyOrderNoComplete`。账号密码不回传到应用；cookie 留在该 WebView。拉回的原始票面由 `src/ingest/from12306.ts` 收成草稿。
+12306 同步：新建 WebView 加载 `kyfw.12306.cn` 登录页，用户在窗口内登录。确认登录后打开订单页 `train_order.html`，再注入脚本请求 `checkUser` / `login/conf`、`queryMyOrderNoComplete`、`queryMyOrder`（未出行按订票日期与乘车日期，历史按约 30 天一段往前查，接口拒绝更早的日期就停止）。账号密码不回传到应用；cookie 留在该 WebView。拉回的原始票面由 `src/ingest/from12306.ts` 收成草稿，并按用户填写的乘车人姓名（`passengerDTO.passenger_name`）过滤，同一订单里其他乘车人的票不入核对列表；姓名存在 `localStorage`。
 
 ## 测试与构建
 
+- `cargo test --offline --manifest-path src-tauri/Cargo.toml`：验证原子写入、失败清理和并发临时文件隔离。
+- 保存事务与恢复测试覆盖失败重试、并发提交、版本不兼容、异常记录和迁移备份失败。
+- 页面按需加载；地图图层与图例共享聚合结果，缩放时复用聚合结果。
 - `npm test`：Vitest，覆盖指纹、城市、解析、档案迁移、12306 票面映射、统计等，不启动窗口。
 - `npm run build`：`tsc && vite build`，输出 `dist/`，供 `tauri build` 打进应用。
+
+导出文件（`src/data/tripsCsv.ts`）是一张 CSV 行程表，与本机档案 `trips.json` 是两种格式：本机档案按电报码存车站、带 id 与指纹，供程序内部使用；CSV 只有站名与用户可见字段。`parseImportText` 能读 CSV 和旧的 JSON 档案。
 
 前端与 Rust 之间的契约是 `invoke` 的命令名和 JSON 形状；没有 OpenAPI，改命令时两边一起改。

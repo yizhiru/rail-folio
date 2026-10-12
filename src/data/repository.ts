@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ArchiveParseError, emptyArchive, parseArchiveText } from "./archiveSchema";
+import { ARCHIVE_VERSION } from "../domain/types";
 import type { Archive, OcrItem } from "../domain/types";
 
 const STORAGE_KEY = "rail-folio-archive";
@@ -11,6 +12,7 @@ function isTauri(): boolean {
 export type LoadResult = {
   archive: Archive;
   /** 原档案损坏时：已把原文件移走备份，当前从空档案开始。 */
+  notice?: string;
   recovered?: { backupPath: string; reason: string };
 };
 
@@ -33,7 +35,20 @@ export async function loadArchive(): Promise<LoadResult> {
     ? await invoke<string>("load_archive")
     : localStorage.getItem(STORAGE_KEY);
   try {
-    return { archive: parseArchiveText(raw) };
+    const archive = parseArchiveText(raw);
+    if (raw?.trim()) {
+      const parsed = JSON.parse(raw);
+      const needsBackup = (parsed.version ?? 1) < ARCHIVE_VERSION
+        || parsed.trips.some((trip: { fingerprint?: string }, index: number) => trip.fingerprint !== archive.trips[index]?.fingerprint);
+      if (needsBackup) {
+        const backupPath = isTauri()
+          ? await invoke<string>("backup_archive", { preserve: true })
+          : `${STORAGE_KEY}.before-migration-${Date.now()}`;
+        if (!isTauri()) localStorage.setItem(backupPath, raw);
+        return { archive, notice: `档案已升级或修正指纹，原始内容已备份到 ${backupPath}` };
+      }
+    }
+    return { archive };
   } catch (err) {
     if (!(err instanceof ArchiveParseError)) throw err;
     const backupPath = await backupCorruptArchive(raw);
@@ -87,11 +102,12 @@ export async function writeTextFile(path: string, contents: string): Promise<voi
     await invoke("write_text_file", { path, contents });
     return;
   }
-  const blob = new Blob([contents], { type: "application/json" });
+  const isCsv = path.toLowerCase().endsWith(".csv");
+  const blob = new Blob([contents], { type: isCsv ? "text/csv;charset=utf-8" : "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = path.split("/").pop() ?? "rail-folio.json";
+  link.download = path.split("/").pop() ?? "rail-folio.csv";
   link.click();
   URL.revokeObjectURL(url);
 }

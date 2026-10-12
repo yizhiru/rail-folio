@@ -1,3 +1,4 @@
+import { isValidDate, isValidTime, isValidDayOffset } from "../domain/tripValidation";
 import {
   categoryFromTrainNo,
   createTripId,
@@ -22,6 +23,10 @@ export class ArchiveParseError extends Error {
     this.name = "ArchiveParseError";
   }
 }
+
+/** 内容可解析但不能安全使用时保留原档案，并禁止写入。 */
+export class ArchiveValidationError extends Error {}
+export class ArchiveVersionError extends Error {}
 
 export const emptyArchive = (): Archive => ({
   version: ARCHIVE_VERSION,
@@ -65,7 +70,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function optionalNumber(value: unknown): number | undefined {
@@ -82,7 +87,14 @@ export function sanitizeTrip(raw: unknown, fallbackSource: TripSource): Trip | u
   const trainNo = optionalString(raw.trainNo);
   const fromStationId = optionalString(raw.fromStationId);
   const toStationId = optionalString(raw.toStationId);
-  if (!date || !trainNo || !fromStationId || !toStationId) return undefined;
+  if (!date || !isValidDate(date) || !trainNo || !fromStationId || !toStationId) return undefined;
+  if (raw.departureTime && (typeof raw.departureTime !== "string" || !isValidTime(raw.departureTime.trim()))) return undefined;
+  if (raw.arrivalTime && (typeof raw.arrivalTime !== "string" || !isValidTime(raw.arrivalTime.trim()))) return undefined;
+  if (raw.arrivalDayOffset != null && !isValidDayOffset(raw.arrivalDayOffset)) return undefined;
+  if (raw.arrivalDayOffset === 0 && typeof raw.departureTime === "string" && typeof raw.arrivalTime === "string") {
+    const minutes = (time: string) => time.split(":").reduce((h, m) => h * 60 + Number(m), 0);
+    if (minutes(raw.arrivalTime) < minutes(raw.departureTime)) return undefined;
+  }
 
   const source = (TRIP_SOURCES as readonly string[]).includes(String(raw.source))
     ? (raw.source as TripSource)
@@ -100,14 +112,13 @@ export function sanitizeTrip(raw: unknown, fallbackSource: TripSource): Trip | u
     toStationId,
     departureTime: optionalString(raw.departureTime),
     arrivalTime: optionalString(raw.arrivalTime),
+    arrivalDayOffset: isValidDayOffset(raw.arrivalDayOffset) ? raw.arrivalDayOffset : undefined,
     seatClass: optionalString(raw.seatClass),
     ticketPrice: parseTicketPrice(raw.ticketPrice),
     distanceKm: optionalNumber(raw.distanceKm),
     notes: optionalString(raw.notes),
     source,
-    fingerprint:
-      optionalString(raw.fingerprint) ??
-      tripFingerprint(date, trainNo, fromStationId, toStationId),
+    fingerprint: tripFingerprint(date, trainNo, fromStationId, toStationId),
   };
 }
 
@@ -173,7 +184,7 @@ function migrateV2(trips: Trip[], customStations: Station[]): { trips: Trip[]; c
 
 /**
  * 校验并迁移任意来源的档案对象。结构不对时抛出 ArchiveParseError，
- * 单条记录不合法时丢弃该条而不是整份失败。
+ * 单条记录不合法时报告错误，防止下次保存静默丢失记录。
  */
 export function normalizeArchive(parsed: unknown, fallbackSource: TripSource): Archive {
   if (!isRecord(parsed)) {
@@ -183,13 +194,20 @@ export function normalizeArchive(parsed: unknown, fallbackSource: TripSource): A
     throw new ArchiveParseError("档案里没有 trips 数组");
   }
   const version = typeof parsed.version === "number" ? parsed.version : 1;
+  if (!Number.isInteger(version) || version < 1) throw new ArchiveVersionError("档案版本无效");
   if (version > ARCHIVE_VERSION) {
-    throw new ArchiveParseError(`档案版本 ${version} 高于当前程序支持的 ${ARCHIVE_VERSION}`);
+    throw new ArchiveVersionError(`档案版本 ${version} 高于当前程序支持的 ${ARCHIVE_VERSION}`);
   }
 
-  let trips = parsed.trips
-    .map((item) => sanitizeTrip(item, fallbackSource))
-    .filter((item): item is Trip => item != null);
+  const sanitized = parsed.trips.map((item) => sanitizeTrip(item, fallbackSource));
+  let trips = sanitized.filter((item): item is Trip => item != null);
+  const invalidTrips = sanitized.flatMap((item, index) => item ? [] : [index + 1]);
+  if (invalidTrips.length) {
+    throw new ArchiveValidationError(`${invalidTrips.length} 条行程字段异常（第 ${invalidTrips.slice(0, 10).join("、")} 条），请检查日期、时刻和必填字段；原档案已保留`);
+  }
+  if (new Set(trips.map((trip) => trip.id)).size !== trips.length) {
+    throw new ArchiveValidationError("档案存在重复行程 ID，原档案已保留，请修正后重试");
+  }
   if (version < 2) {
     trips = trips.map(migrateV1Trip);
   }
@@ -199,6 +217,12 @@ export function normalizeArchive(parsed: unknown, fallbackSource: TripSource): A
         .map(sanitizeStation)
         .filter((item): item is Station => item != null)
     : [];
+  if (parsed.customStations != null && (!Array.isArray(parsed.customStations) || customStations.length !== parsed.customStations.length)) {
+    throw new ArchiveValidationError("自定义车站字段异常，原档案已保留");
+  }
+  if (new Set(customStations.map((station) => station.id)).size !== customStations.length) {
+    throw new ArchiveValidationError("档案存在重复车站 ID，原档案已保留");
+  }
   if (version < 3) {
     ({ trips, customStations } = migrateV2(trips, customStations));
   }

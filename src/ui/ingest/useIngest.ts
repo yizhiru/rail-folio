@@ -18,6 +18,24 @@ import { parseTicketText } from "../../ingest/parseTicket";
 const IMAGE_EXT = /\.(png|jpe?g|webp|heic|heif|tiff?|bmp)$/i;
 const MAX_BATCH = 200;
 const DESKTOP_ONLY = "识别图片请用桌面应用启动：npm run tauri dev";
+const PASSENGER_KEY = "rail-folio.passengerName";
+
+function loadPassengerName(): string {
+  try {
+    return localStorage.getItem(PASSENGER_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function savePassengerName(value: string) {
+  try {
+    if (value) localStorage.setItem(PASSENGER_KEY, value);
+    else localStorage.removeItem(PASSENGER_KEY);
+  } catch {
+    /* 存不下也不影响本次同步 */
+  }
+}
 
 export type IngestOptions = {
   trips: Trip[];
@@ -29,7 +47,7 @@ export type IngestOptions = {
   onDropStarted?: () => void;
 };
 
-export type DraftPatch = Partial<Pick<TripDraft["parsed"], "date" | "trainNo" | "fromName" | "toName" | "departureTime" | "arrivalTime" | "seatClass" | "ticketPrice" | "notes">> & {
+export type DraftPatch = Partial<Pick<TripDraft["parsed"], "date" | "trainNo" | "fromName" | "toName" | "departureTime" | "arrivalTime" | "arrivalDayOffset" | "seatClass" | "ticketPrice" | "notes">> & {
   selected?: boolean;
 };
 
@@ -39,11 +57,21 @@ export type DraftPatch = Partial<Pick<TripDraft["parsed"], "date" | "trainNo" | 
  */
 export function useIngest(options: IngestOptions) {
   const { trips, stations, onCommit, onEnsureStation, onDropStarted } = options;
+  const committingRef = useRef(false);
+  const [committing, setCommitting] = useState(false);
   const [source, setSource] = useState<TripSource>("ocr");
   const [drafts, setDrafts] = useState<TripDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [passengerName, setPassengerNameState] = useState(loadPassengerName);
 
+  const setPassengerName = useCallback((value: string) => {
+    setPassengerNameState(value);
+    savePassengerName(value.trim());
+  }, []);
+
+  const passengerRef = useRef(passengerName);
+  passengerRef.current = passengerName;
   const tripsRef = useRef(trips);
   const stationsRef = useRef(stations);
   const sourceRef = useRef(source);
@@ -78,7 +106,7 @@ export function useIngest(options: IngestOptions) {
         setMessage(DESKTOP_ONLY);
         return;
       }
-      if (busyRef.current) return;
+      if (busyRef.current || committingRef.current) return;
       busyRef.current = true;
       setBusy(true);
       setMessage("正在扫描文件…");
@@ -167,7 +195,7 @@ export function useIngest(options: IngestOptions) {
     let unlisten: (() => void) | undefined;
     void getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (event.payload.type !== "drop" || busyRef.current) return;
+        if (event.payload.type !== "drop" || busyRef.current || committingRef.current) return;
         onDropStarted?.();
         void recognizePaths(event.payload.paths);
       })
@@ -182,6 +210,7 @@ export function useIngest(options: IngestOptions) {
   }, [recognizePaths, onDropStarted]);
 
   const updateDraft = useCallback((id: string, patch: DraftPatch) => {
+    if (committingRef.current) return;
     setDrafts((current) =>
       current.map((draft) => {
         if (draft.id !== id) return draft;
@@ -198,10 +227,12 @@ export function useIngest(options: IngestOptions) {
   }, []);
 
   const removeDraft = useCallback((id: string) => {
+    if (committingRef.current) return;
     setDrafts((current) => current.filter((draft) => draft.id !== id));
   }, []);
 
   const clearDrafts = useCallback(() => {
+    if (committingRef.current) return;
     setDrafts([]);
     setMessage(null);
   }, []);
@@ -212,17 +243,29 @@ export function useIngest(options: IngestOptions) {
       setMessage(DESKTOP_ONLY);
       return;
     }
-    if (busyRef.current) return;
+    if (busyRef.current || committingRef.current) return;
+    const passenger = passengerRef.current.trim();
+    if (!passenger) {
+      setMessage("请先填写乘车人姓名：同一订单里可能有多位乘车人，只同步这一位的行程");
+      return;
+    }
     busyRef.current = true;
     setBusy(true);
     setMessage("正在打开 12306…");
     try {
       const tickets = await sync12306Orders((text) => setMessage(text));
-      const { drafts: incoming, skippedExisting } = draftsFrom12306(
-        tickets,
-        stationsRef.current,
-        tripsRef.current,
-      );
+      const {
+        drafts: incoming,
+        skippedExisting,
+        passengers,
+        skippedOtherPassengers,
+      } = draftsFrom12306(tickets, stationsRef.current, tripsRef.current, passenger);
+      if (skippedOtherPassengers > 0 && incoming.length === 0 && skippedExisting === 0) {
+        setMessage(
+          `订单里没有乘车人「${passenger}」的车票（出现的乘车人：${passengers.join("、")}），请核对姓名`,
+        );
+        return;
+      }
       const known = new Set(
         draftsRef.current
           .map((draft) => {
@@ -265,77 +308,90 @@ export function useIngest(options: IngestOptions) {
   }, []);
 
   const commit = useCallback(async () => {
-    const chosen = draftsRef.current.filter((draft) => draft.selected);
-    if (chosen.length === 0) {
-      setMessage("请先勾选要入库的记录");
-      return;
-    }
-    const committedIds = new Set<string>();
-    const payload: TripInput[] = [];
-    for (const draft of chosen) {
-      const fromName = draft.parsed.fromName?.trim();
-      const toName = draft.parsed.toName?.trim();
-      const { date, trainNo } = draft.parsed;
-      if (!date || !trainNo || !fromName || !toName) continue;
-      const from = onEnsureStation(fromName);
-      const to = onEnsureStation(toName);
-      const fingerprint = tripFingerprint(date, trainNo, from.id, to.id);
-      const dup = findDuplicate({ fingerprint }, tripsRef.current);
-      if (dup && !tripNeedsFill(dup, draft.parsed)) {
-        committedIds.add(draft.id);
-        continue;
-      }
-      committedIds.add(draft.id);
-      payload.push({
-        date,
-        trainNo,
-        fromStationId: from.id,
-        toStationId: to.id,
-        departureTime: draft.parsed.departureTime,
-        arrivalTime: draft.parsed.arrivalTime,
-        seatClass: draft.parsed.seatClass,
-        ticketPrice: draft.parsed.ticketPrice,
-        notes: draft.parsed.notes,
-        source: draft.parsed.source ?? sourceRef.current,
-      });
-    }
-    if (payload.length === 0) {
-      if (committedIds.size > 0) {
-        setDrafts((current) => current.filter((draft) => !committedIds.has(draft.id)));
-        setMessage("勾选的记录都已在档案中，没有可补充的信息");
+    if (committingRef.current || busyRef.current) return;
+    committingRef.current = true;
+    setCommitting(true);
+    try {
+      const chosen = draftsRef.current.filter((draft) => draft.selected);
+      if (chosen.length === 0) {
+        setMessage("请先勾选要入库的记录");
         return;
       }
-      setMessage("勾选的记录缺少日期 / 车次 / 车站，请先补全");
-      return;
+      const committedIds = new Set<string>();
+      const payload: TripInput[] = [];
+      for (const draft of chosen) {
+        const fromName = draft.parsed.fromName?.trim();
+        const toName = draft.parsed.toName?.trim();
+        const { date, trainNo } = draft.parsed;
+        if (!date || !trainNo || !fromName || !toName) continue;
+        const from = onEnsureStation(fromName);
+        const to = onEnsureStation(toName);
+        const fingerprint = tripFingerprint(date, trainNo, from.id, to.id);
+        const dup = findDuplicate({ fingerprint }, tripsRef.current);
+        if (dup && !tripNeedsFill(dup, draft.parsed)) {
+          committedIds.add(draft.id);
+          continue;
+        }
+        committedIds.add(draft.id);
+        payload.push({
+          date,
+          trainNo,
+          fromStationId: from.id,
+          toStationId: to.id,
+          departureTime: draft.parsed.departureTime,
+          arrivalTime: draft.parsed.arrivalTime,
+          arrivalDayOffset: draft.parsed.arrivalDayOffset,
+          seatClass: draft.parsed.seatClass,
+          ticketPrice: draft.parsed.ticketPrice,
+          notes: draft.parsed.notes,
+          source: draft.parsed.source ?? sourceRef.current,
+        });
+      }
+      if (payload.length === 0) {
+        if (committedIds.size > 0) {
+          setDrafts((current) => current.filter((draft) => !committedIds.has(draft.id)));
+          setMessage("勾选的记录都已在档案中，没有可补充的信息");
+          return;
+        }
+        setMessage("勾选的记录缺少日期 / 车次 / 车站，请先补全");
+        return;
+      }
+      const persisted = await onCommit(payload);
+      if (!persisted) {
+        setMessage("写入档案失败，记录仍保留在列表里");
+        return;
+      }
+      setDrafts((current) => current.filter((draft) => !committedIds.has(draft.id)));
+      const skippedDup = committedIds.size - payload.length;
+      const skippedIncomplete = chosen.length - committedIds.size;
+      const extras = [
+        skippedDup > 0 ? `${skippedDup} 条已在档案中` : "",
+        skippedIncomplete > 0 ? `${skippedIncomplete} 条信息不完整未入库` : "",
+      ].filter(Boolean);
+      setMessage(
+        extras.length > 0
+          ? `已写入 ${payload.length} 条，另有 ${extras.join("，")}`
+          : `已写入 ${payload.length} 条`,
+      );
+    } catch (err) {
+      setMessage(`写入失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      committingRef.current = false;
+      setCommitting(false);
     }
-    const persisted = await onCommit(payload);
-    if (!persisted) {
-      setMessage("写入档案失败，记录仍保留在列表里");
-      return;
-    }
-    setDrafts((current) => current.filter((draft) => !committedIds.has(draft.id)));
-    const skippedDup = committedIds.size - payload.length;
-    const skippedIncomplete = chosen.length - committedIds.size;
-    const extras = [
-      skippedDup > 0 ? `${skippedDup} 条已在档案中` : "",
-      skippedIncomplete > 0 ? `${skippedIncomplete} 条信息不完整未入库` : "",
-    ].filter(Boolean);
-    setMessage(
-      extras.length > 0
-        ? `已写入 ${payload.length} 条，另有 ${extras.join("，")}`
-        : `已写入 ${payload.length} 条`,
-    );
   }, [onCommit, onEnsureStation]);
 
   return {
     source,
     setSource,
     drafts,
-    busy,
+    busy: busy || committing,
     message,
     recognizePaths,
     pickImages,
     pickFolder,
+    passengerName,
+    setPassengerName,
     syncFrom12306,
     updateDraft,
     removeDraft,

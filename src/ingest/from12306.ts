@@ -1,3 +1,4 @@
+import { dateDayOffset, isValidDate } from "../domain/tripValidation";
 import { categoryFromTrainNo, findDuplicate, normalizeTrainNo, tripFingerprint } from "../domain/fingerprint";
 import { tripNeedsFill } from "../domain/tripFill";
 import { parseTicketPrice } from "../domain/price";
@@ -13,12 +14,15 @@ export type Rail12306Ticket = {
   toTelecode?: string;
   departureTime?: string;
   arrivalTime?: string;
+  arrivalDayOffset?: number;
   seatClass?: string;
   coachNo?: string;
   seatNo?: string;
   sequenceNo?: string;
   status?: string;
   ticketPrice?: number;
+  /** 乘车人姓名；同一订单里可以有多位乘车人。 */
+  passengerName?: string;
 };
 
 const SKIP_STATUS = /退票|取消|已改签/;
@@ -38,6 +42,15 @@ function text(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+/** 票价优先用订单页展示的字符串；纯数字 0 不当作有效票价。 */
+function firstPrice(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+  return undefined;
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -45,9 +58,15 @@ function pad(value: number): string {
 export function parse12306Date(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const iso = /(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/.exec(value);
-  if (iso) return `${iso[1]}-${pad(Number(iso[2]))}-${pad(Number(iso[3]))}`;
+  if (iso) {
+    const date = `${iso[1]}-${pad(Number(iso[2]))}-${pad(Number(iso[3]))}`;
+    return isValidDate(date) ? date : undefined;
+  }
   const compact = /^(\d{4})(\d{2})(\d{2})/.exec(value.trim());
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  if (compact) {
+    const date = `${compact[1]}-${compact[2]}-${compact[3]}`;
+    return isValidDate(date) ? date : undefined;
+  }
   return undefined;
 }
 
@@ -76,38 +95,55 @@ function lookupByTelecode(code: string | undefined, stations: Station[]): Statio
 export function normalize12306Ticket(raw: unknown): Rail12306Ticket | undefined {
   if (!isRecord(raw)) return undefined;
   const train = asRecord(raw.stationTrainDTO);
+  const passenger = asRecord(raw.passengerDTO);
   const trainNo = text(
     raw.stationTrainCode,
     raw.station_train_code,
     raw.board_train_code,
+    raw.train_code,
+    raw.trainCode,
     train.station_train_code,
     train.stationTrainCode,
   );
-  const fromName = text(raw.from_station_name, train.from_station_name);
-  const toName = text(raw.to_station_name, train.to_station_name);
+  const fromName = text(raw.from_station_name, raw.fromStationName, train.from_station_name);
+  const toName = text(raw.to_station_name, raw.toStationName, train.to_station_name);
   if (!trainNo && !fromName && !toName) return undefined;
 
-  const startTime = text(raw.start_time, train.start_time);
-  const arriveTime = text(raw.arrive_time, train.arrive_time);
+  const startTime = text(raw.start_time, raw.startTime, train.start_time, train.startTime);
+  const arriveTime = text(raw.arrive_time, raw.arriveTime, train.arrive_time, train.arriveTime);
+  const date = parse12306Date(raw.train_date) ??
+      parse12306Date(raw.start_train_date_page) ??
+      parse12306Date(raw.train_date_local) ??
+      parse12306Date(raw.start_date) ??
+      parse12306Date(startTime);
   return {
     trainNo: trainNo ? normalizeTrainNo(trainNo) : undefined,
-    date: parse12306Date(raw.train_date) ?? parse12306Date(startTime) ?? parse12306Date(raw.start_train_date_page),
+    date,
     fromName,
     toName,
     fromTelecode: text(raw.from_station_telecode, train.from_station_telecode),
     toTelecode: text(raw.to_station_telecode, train.to_station_telecode),
     departureTime: parse12306Clock(startTime),
     arrivalTime: parse12306Clock(arriveTime),
+    arrivalDayOffset: dateDayOffset(date, parse12306Date(raw.arrive_date) ?? parse12306Date(raw.arrival_date) ?? parse12306Date(arriveTime)),
     seatClass: matchSeat(text(raw.seat_type_name, raw.seat_type_code)),
-    coachNo: text(raw.coach_no, raw.coachNo),
+    coachNo: text(raw.coach_no, raw.coachNo, raw.coach_name),
     seatNo: text(raw.seat_name, raw.seat_no),
     sequenceNo: text(raw.sequence_no, raw.sequenceNo),
-    status: text(raw.ticket_status_name, raw.ticket_status),
+    status: text(raw.ticket_status_name, raw.status_name, raw.ticket_status),
+    passengerName: text(
+      passenger.passenger_name,
+      passenger.passengerName,
+      raw.passenger_name,
+      raw.passengerName,
+    ),
     ticketPrice: parseTicketPrice(
-      raw.ticket_price ??
-        raw.ticketPrice ??
-        raw.str_ticket_price_page ??
+      firstPrice(
+        raw.str_ticket_price_page,
         raw.ticket_price_page,
+        raw.ticket_price,
+        raw.ticketPrice,
+      ),
     ),
   };
 }
@@ -133,20 +169,40 @@ export type From12306Result = {
   drafts: TripDraft[];
   /** 指纹相同且没有可补的空字段，直接丢弃不再进入核对列表。 */
   skippedExisting: number;
+  /** 订单里出现过的乘车人（去重，按出现顺序），用于对不上名字时提示。 */
+  passengers: string[];
+  /** 乘车人不是指定的人，被略过的车票数。 */
+  skippedOtherPassengers: number;
 };
+
+function nameKey(value: string | undefined): string {
+  return (value ?? "").replace(/[\s\u3000·•]/g, "");
+}
 
 export function draftsFrom12306(
   rawTickets: unknown[],
   stations: Station[],
   existing: Trip[],
+  /** 只收这位乘车人的车票；同一订单里其他乘车人的票会被略过。 */
+  passengerName?: string,
 ): From12306Result {
   const seen = new Set<string>();
   const drafts: TripDraft[] = [];
+  const passengers: string[] = [];
+  const wanted = nameKey(passengerName);
   let skippedExisting = 0;
+  let skippedOtherPassengers = 0;
 
   for (const raw of rawTickets) {
     const ticket = normalize12306Ticket(raw);
     if (!ticket || !isActiveTicket(ticket)) continue;
+    if (ticket.passengerName && !passengers.includes(ticket.passengerName)) {
+      passengers.push(ticket.passengerName);
+    }
+    if (wanted && nameKey(ticket.passengerName) !== wanted) {
+      skippedOtherPassengers += 1;
+      continue;
+    }
     const from = resolveStation(ticket.fromName, ticket.fromTelecode, stations);
     const to = resolveStation(ticket.toName, ticket.toTelecode, stations);
     const fromId = from?.id;
@@ -166,6 +222,7 @@ export function draftsFrom12306(
     const needsReview = !ticket.date || !ticket.trainNo || !from || !to;
     const details = [
       ticket.sequenceNo ? `订单 ${ticket.sequenceNo}` : "12306 订单",
+      ticket.passengerName,
       ticket.coachNo && ticket.seatNo ? `${ticket.coachNo}车${ticket.seatNo}` : ticket.seatNo,
       ticket.ticketPrice != null ? `${ticket.ticketPrice}元` : undefined,
       ticket.status,
@@ -187,6 +244,7 @@ export function draftsFrom12306(
         toName: to?.name ?? ticket.toName,
         departureTime: ticket.departureTime,
         arrivalTime: ticket.arrivalTime,
+        arrivalDayOffset: ticket.arrivalDayOffset,
         seatClass: ticket.seatClass,
         ticketPrice: ticket.ticketPrice,
         notes: ticket.sequenceNo ? `12306 ${ticket.sequenceNo}` : "12306 同步",
@@ -198,5 +256,5 @@ export function draftsFrom12306(
     });
   }
 
-  return { drafts, skippedExisting };
+  return { drafts, skippedExisting, passengers, skippedOtherPassengers };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { bundledStations } from "../assets/stations";
 import { cityFromStationName, cityOfStation } from "./city";
 
 describe("cityOfStation", () => {
@@ -23,5 +24,39 @@ describe("cityOfStation", () => {
     expect(cityFromStationName("启东站")).toBe("启东");
     expect(cityFromStationName("海东")).toBe("海东");
     expect(cityFromStationName("周口东")).toBe("周口");
+  });
+});
+
+describe("bundled station table", () => {
+  const cityOf = (name: string) => {
+    const station = bundledStations.find((item) => item.name === name);
+    expect(station, name).toBeDefined();
+    return cityOfStation(station!);
+  };
+
+  it("puts county-level stations under their prefecture-level city", () => {
+    expect(cityOf("京山")).toBe("荆门");
+    expect(cityOf("京山南")).toBe("荆门");
+    expect(cityOf("钟祥南")).toBe("荆门");
+    expect(cityOf("当阳西")).toBe("宜昌");
+    expect(cityOf("建德南")).toBe("杭州");
+    expect(cityOf("温岭西")).toBe("台州");
+    expect(cityOf("汉川北")).toBe("孝感");
+  });
+
+  it("keeps a county and its directional stations in one city", () => {
+    for (const [a, b] of [
+      ["灵武", "灵武北"],
+      ["富平", "富平南"],
+      ["宜城", "宜城南"],
+      ["安溪", "安溪东"],
+    ]) {
+      expect(cityOf(a)).toBe(cityOf(b));
+    }
+  });
+
+  it("treats Chongqing districts like other municipalities", () => {
+    expect(cityOf("万州")).toBe("重庆");
+    expect(cityOf("重庆北")).toBe("重庆");
   });
 });

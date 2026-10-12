@@ -55,3 +55,15 @@ describe("formatDuration", () => {
     expect(formatDuration(26 * 60)).toBe("26 h");
   });
 });
+
+describe("explicit arrival days", () => {
+  it("handles journeys lasting more than 24 or 48 hours", () => {
+    expect(tripDurationMin(trip({ departureTime: "09:00", arrivalTime: "12:00", arrivalDayOffset: 1 }))).toEqual({ minutes: 27 * 60 });
+    expect(tripDurationMin(trip({ departureTime: "09:00", arrivalTime: "12:00", arrivalDayOffset: 2 }))).toEqual({ minutes: 51 * 60 });
+  });
+  it("honors zero and rejects inconsistent or invalid offsets", () => {
+    expect(tripDurationMin(trip({ departureTime: "09:00", arrivalTime: "09:00", arrivalDayOffset: 0 }))).toEqual({ minutes: 0 });
+    expect(tripDurationMin(trip({ departureTime: "20:00", arrivalTime: "09:00", arrivalDayOffset: 0 }))).toBeUndefined();
+    expect(tripDurationMin(trip({ departureTime: "09:00", arrivalTime: "12:00", arrivalDayOffset: -1 }))).toBeUndefined();
+  });
+});

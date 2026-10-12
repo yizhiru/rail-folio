@@ -3,6 +3,7 @@ import { tripFingerprint } from "../domain/fingerprint";
 import { ARCHIVE_VERSION } from "../domain/types";
 import {
   ArchiveParseError,
+  ArchiveValidationError,
   normalizeArchive,
   parseArchiveText,
   sanitizeTrip,
@@ -24,8 +25,8 @@ describe("parseArchiveText", () => {
     expect(() => parseArchiveText('{"version":99,"trips":[]}')).toThrow(/版本/);
   });
 
-  it("drops malformed trips but keeps the valid ones", () => {
-    const archive = parseArchiveText(
+  it("rejects malformed records instead of silently dropping them", () => {
+    expect(() => parseArchiveText(
       JSON.stringify({
         version: 2,
         trips: [
@@ -35,9 +36,7 @@ describe("parseArchiveText", () => {
         ],
         customStations: [{ id: "custom:x", name: "x" }, { name: "no id" }],
       }),
-    );
-    expect(archive.trips.map((trip) => trip.id)).toEqual(["ok"]);
-    expect(archive.customStations).toHaveLength(1);
+    )).toThrow(ArchiveValidationError);
   });
 });
 
@@ -55,13 +54,13 @@ describe("sanitizeTrip", () => {
   });
 
   it("ignores non-positive or non-numeric distances", () => {
-    expect(sanitizeTrip({ date: "d", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: -5 }, "manual")?.distanceKm).toBeUndefined();
-    expect(sanitizeTrip({ date: "d", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: "300" }, "manual")?.distanceKm).toBeUndefined();
-    expect(sanitizeTrip({ date: "d", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: 300 }, "manual")?.distanceKm).toBe(300);
+    expect(sanitizeTrip({ date: "2024-01-01", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: -5 }, "manual")?.distanceKm).toBeUndefined();
+    expect(sanitizeTrip({ date: "2024-01-01", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: "300" }, "manual")?.distanceKm).toBeUndefined();
+    expect(sanitizeTrip({ date: "2024-01-01", trainNo: "G1", fromStationId: "a", toStationId: "b", distanceKm: 300 }, "manual")?.distanceKm).toBe(300);
   });
 
   it("keeps a positive ticket price and drops invalid ones", () => {
-    const base = { date: "d", trainNo: "G1", fromStationId: "a", toStationId: "b" };
+    const base = { date: "2024-01-01", trainNo: "G1", fromStationId: "a", toStationId: "b" };
     expect(sanitizeTrip({ ...base, ticketPrice: 553.5 }, "manual")?.ticketPrice).toBe(553.5);
     expect(sanitizeTrip({ ...base, ticketPrice: "144.50元" }, "manual")?.ticketPrice).toBe(144.5);
     expect(sanitizeTrip({ ...base, ticketPrice: 0 }, "manual")?.ticketPrice).toBeUndefined();
@@ -164,6 +163,6 @@ describe("v1 → v2 migration", () => {
       fingerprint: "keep",
     };
     const archive = normalizeArchive({ version: 2, trips: [trip], customStations: [] }, "json-import");
-    expect(archive.trips[0]).toMatchObject({ fromStationId: "FYS", toStationId: "CUW", distanceKm: 1000, fingerprint: "keep" });
+    expect(archive.trips[0]).toMatchObject({ fromStationId: "FYS", toStationId: "CUW", distanceKm: 1000, fingerprint: tripFingerprint("2024-01-01", "G1", "FYS", "CUW") });
   });
 });

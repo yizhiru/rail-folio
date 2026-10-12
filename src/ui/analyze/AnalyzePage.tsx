@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatTicketPrice } from "../../domain/price";
 import { TRAIN_CATEGORY_LABEL, type Station, type TrainCategory, type Trip } from "../../domain/types";
-import { CATEGORY_COLORS } from "../../map/buildLayers";
+import { CATEGORY_COLORS } from "../charts/categoryColors";
 import {
   analyzeYear,
   listYears,
@@ -11,6 +11,7 @@ import { EChart } from "../charts/EChart";
 import type { EChartsOption } from "../charts/echarts";
 import { DurationValue } from "../DurationValue";
 import { TripMap } from "../map/TripMap";
+import { useMapGranularity } from "../map/useMapGranularity";
 
 type Props = {
   trips: Trip[];
@@ -131,6 +132,7 @@ function yearCharts(view: YearView) {
 export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
   const years = useMemo(() => listYears(trips), [trips]);
   const [year, setYear] = useState(years[0] ?? "");
+  const [granularity, setGranularity] = useMapGranularity();
   const [categoryMetric, setCategoryMetric] = useState<CategoryMetric>("count");
   const yearTrips = useMemo(
     () => (year ? trips.filter((trip) => trip.date.slice(0, 4) === year) : []),
@@ -184,7 +186,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
             <div className="value">{slice.tripCount}</div>
           </article>
           <article className="card">
-            <div className="label">往来城市</div>
+            <div className="label">到过城市</div>
             <div className="value">{slice.cityCount}</div>
           </article>
           <article className="card">
@@ -192,7 +194,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
             <DurationValue minutes={slice.totalMinutes > 0 ? slice.totalMinutes : null} />
           </article>
           <article className="card">
-            <div className="label">票价合计</div>
+            <div className="label">总花费</div>
             <div className="value value-compact">{slice.ticketPriceLabel}</div>
             {slice.pricedTripCount > 0 && slice.pricedTripCount < slice.tripCount ? (
               <div className="hint">已填 {slice.pricedTripCount} 条</div>
@@ -203,7 +205,12 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
 
       {year ? (
         <div className="card map-wrap">
-          <TripMap trips={yearTrips} stations={stations} />
+          <TripMap
+            trips={yearTrips}
+            stations={stations}
+            granularity={granularity}
+            onGranularityChange={setGranularity}
+          />
         </div>
       ) : null}
 
@@ -218,7 +225,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
             )}
           </article>
           <article className="card">
-            <div className="label">往来城市</div>
+            <div className="label">常去城市</div>
             {yearView && yearView.topCities.length === 0 ? (
               <div className="muted">这一年还没有行程</div>
             ) : (
@@ -227,7 +234,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
           </article>
           <article className="card">
             <div className="card-head">
-              <div className="label">车型</div>
+              <div className="label">车型占比</div>
               <div className="seg" role="group" aria-label="车型统计口径">
                 <button
                   type="button"

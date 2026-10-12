@@ -52,6 +52,28 @@ describe("normalize12306Ticket", () => {
       ticketPrice: 144.5,
     });
   });
+
+  it("prefers the displayed fare and reads flat order fields", () => {
+    const ticket = normalize12306Ticket({
+      train_code: "D56",
+      from_station_name: "南京南",
+      to_station_name: "上海虹桥",
+      start_date: "2024-06-01",
+      start_time: "18:20",
+      arrive_time: "20:01",
+      status_name: "已出站",
+      ticket_price: 14450,
+      str_ticket_price_page: "144.5",
+    });
+    expect(ticket).toMatchObject({
+      trainNo: "D56",
+      date: "2024-06-01",
+      departureTime: "18:20",
+      arrivalTime: "20:01",
+      status: "已出站",
+      ticketPrice: 144.5,
+    });
+  });
 });
 
 describe("draftsFrom12306", () => {
@@ -81,6 +103,24 @@ describe("draftsFrom12306", () => {
       source: "12306",
       ticketPrice: 144.5,
     });
+  });
+
+  it("keeps only the chosen passenger when one order has several", () => {
+    const mine = { ...paid, passengerDTO: { passenger_name: "张三" }, ticket_price: "144.5" };
+    const other = { ...paid, passengerDTO: { passenger_name: "李四" }, ticket_price: "99" };
+    const result = draftsFrom12306([other, mine], stations, [], " 张三 ");
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0].parsed.ticketPrice).toBe(144.5);
+    expect(result.skippedOtherPassengers).toBe(1);
+    expect(result.passengers).toEqual(["李四", "张三"]);
+  });
+
+  it("returns nothing and lists names when the passenger does not match", () => {
+    const other = { ...paid, passengerDTO: { passenger_name: "李四" } };
+    const result = draftsFrom12306([other], stations, [], "王五");
+    expect(result.drafts).toHaveLength(0);
+    expect(result.skippedOtherPassengers).toBe(1);
+    expect(result.passengers).toEqual(["李四"]);
   });
 
   it("skips refunded tickets and dedupes the same ride", () => {
@@ -135,4 +175,9 @@ describe("draftsFrom12306", () => {
     expect(drafts[0].selected).toBe(true);
     expect(drafts[0].parsed.ticketPrice).toBe(144.5);
   });
+});
+
+it("preserves arrival date offsets across month boundaries", () => {
+  const ticket = normalize12306Ticket({ station_train_code: "Z1", train_date: "2024-01-31", start_time: "09:00", arrive_time: "2024-02-02 12:00" });
+  expect(ticket).toMatchObject({ date: "2024-01-31", departureTime: "09:00", arrivalTime: "12:00", arrivalDayOffset: 2 });
 });

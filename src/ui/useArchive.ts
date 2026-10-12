@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allStations } from "../assets/stations";
 import {
-  ensureArchiveStation,
   removeTrip as removeTripOp,
   upsertTrips as upsertTripsOp,
 } from "../data/archiveOps";
+import { ArchiveWriter } from "../data/archiveWriter";
 import { emptyArchive } from "../data/archiveSchema";
 import { loadArchive, saveArchive } from "../data/repository";
 import type { Archive, Station, Trip, TripInput } from "../domain/types";
@@ -18,53 +18,29 @@ export function useArchive() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const archiveRef = useRef(archive);
-  // 读取失败时禁止任何写入，避免用空档案覆盖磁盘上可能还完整的数据。
-  const writableRef = useRef(false);
-  const queueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const writerRef = useRef<ArchiveWriter | null>(null);
+  writerRef.current ??= new ArchiveWriter(saveArchive, setArchive);
+  const writer = writerRef.current;
+  const stations = useMemo(() => allStations(archive), [archive.customStations]);
 
-  const stations = useMemo(() => allStations(archive), [archive]);
-
-  /** 所有写盘串行进行，保证最后落盘的一定是最新状态。resolve 为是否成功。 */
-  const persist = useCallback((next: Archive): Promise<boolean> => {
-    const run = queueRef.current.then(async () => {
-      if (!writableRef.current) {
-        throw new Error("档案尚未成功读取，为避免覆盖数据已禁止写入");
-      }
-      await saveArchive(next);
-    });
-    queueRef.current = run.catch(() => undefined);
-    return run.then(
-      () => {
-        setError(null);
-        return true;
-      },
-      (err: unknown) => {
-        setError(describe(err));
-        return false;
-      },
-    );
-  }, []);
-
-  const commit = useCallback(
-    (recipe: (current: Archive) => Archive): Promise<boolean> => {
-      const next = recipe(archiveRef.current);
-      if (next === archiveRef.current) return Promise.resolve(true);
-      archiveRef.current = next;
-      setArchive(next);
-      return persist(next);
-    },
-    [persist],
-  );
+  const commit = useCallback(async (recipe: (current: Archive) => Archive): Promise<boolean> => {
+    try {
+      await writer.commit(recipe);
+      setError(null);
+      return true;
+    } catch (err) {
+      setError(describe(err));
+      return false;
+    }
+  }, [writer]);
 
   useEffect(() => {
     let cancelled = false;
     loadArchive()
       .then((result) => {
         if (cancelled) return;
-        archiveRef.current = result.archive;
-        writableRef.current = true;
-        setArchive(result.archive);
+        writer.initialize(result.archive);
+        if (result.notice) setNotice(result.notice);
         if (result.recovered) {
           setNotice(
             `原档案无法读取（${result.recovered.reason}），已备份到 ${result.recovered.backupPath}，当前从空档案开始。`,
@@ -80,7 +56,7 @@ export function useArchive() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [writer]);
 
   const upsertTrips = useCallback(
     async (inputs: TripInput[]) => {
@@ -117,15 +93,9 @@ export function useArchive() {
 
   const addCustomStation = useCallback(
     (name: string): Station => {
-      let resolved: Station | undefined;
-      void commit((current) => {
-        const result = ensureArchiveStation(current, name);
-        resolved = result.station;
-        return result.archive;
-      });
-      return resolved as Station;
+      return writer.ensureStation(name);
     },
-    [commit],
+    [writer],
   );
 
   return {
