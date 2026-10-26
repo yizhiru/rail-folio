@@ -21,22 +21,45 @@ npm run dev
 npm test
 ```
 
-## 打包为桌面应用（macOS）
+## 打包为桌面应用
+
+macOS（在 Mac 上执行）：
 
 ```bash
 npm run package:mac
 ```
 
-产物在 `src-tauri/target/release/bundle/`：
+通用二进制（Apple 芯片和 Intel 各打一份再合成，仍需在 Mac 上执行）：
+
+```bash
+bash scripts/package-mac.sh universal-apple-darwin
+```
+
+产物在 `src-tauri/target/<目标>/release/bundle/`（本机默认目标时目录是 `release`）：
 
 - `macos/火车记.app`：拖到「应用程序」即可双击运行。
-- `dmg/火车记_<版本>_<架构>.dmg`：用于分发的安装镜像。
+- `dmg/火车记_<版本>_<架构>.dmg`：用于分发的安装镜像。通用包的架构名是 `universal`。
 
 脚本先调用 `tauri build --bundles app` 生成 `.app`，再用 `hdiutil` 直接做 DMG；没有走 Tauri 自带的 `bundle_dmg.sh`，因为它靠 AppleScript 控制 Finder 排版，在部分 macOS 版本上会间歇性失败。
 
-应用使用 ad-hoc 签名，没有 Apple 开发者证书公证。自己机器上首次打开若被 Gatekeeper 拦下，右键 → 打开，或在「系统设置 → 隐私与安全性」里点「仍要打开」。分发给别人也是同样的处理方式；要免提示需要付费开发者账号做签名 + 公证。
+Windows（在 Windows 上执行，需要 Visual Studio 生成工具）：
 
-数据文件在 macOS：`~/Library/Application Support/com.railfolio.app/trips.json`。
+```bash
+npm run package:win
+```
+
+产物：`src-tauri/target/release/bundle/nsis/火车记_<版本>_x64-setup.exe`。安装时会按需下载 WebView2。
+
+推送 `v*` 标签（例如 `v1.1.0`）会走 `.github/workflows/release.yml`：macOS 通用 DMG 和 Windows 安装包打好后上传到同一个 GitHub Release。
+
+应用使用 ad-hoc 签名，没有 Apple 开发者证书公证，Windows 安装包也未签名。macOS 上首次打开若被 Gatekeeper 拦下，右键 → 打开，或在「系统设置 → 隐私与安全性」里点「仍要打开」。Windows 上 SmartScreen 可能提示未知发布者，选择仍要运行。要免提示需要各自平台的付费签名。
+
+本机截图 OCR 只在 macOS 上可用。Windows 版可以记行程、导入 JSON/CSV，并在应用内登录 12306 后同步订单。
+
+数据文件：
+
+- macOS：`~/Library/Application Support/com.railfolio.app/trips.json`
+- Windows：`%APPDATA%\com.railfolio.app\trips.json`
 
 ## 从 12306 同步
 

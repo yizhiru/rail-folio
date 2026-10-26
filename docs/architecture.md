@@ -29,7 +29,7 @@
 | serde / serde_json | 1 | Rust 侧 JSON |
 | objc2 + objc2-vision | 0.6 / 0.3 | macOS Vision 框架做本机 OCR |
 
-应用标识 `com.railfolio.app`，产品名「火车记」。当前打包目标是 macOS `.app`（`scripts/package-mac.sh`）。
+应用标识 `com.railfolio.app`，产品名「火车记」。macOS 打 `.app` 和 DMG（`scripts/package-mac.sh`），Windows 打 NSIS 安装包。OCR 依赖只在 macOS 上编译。
 
 ### 运行时数据与外部站点
 
