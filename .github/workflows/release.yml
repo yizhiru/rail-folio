@@ -66,7 +66,14 @@ jobs:
               find src-tauri/target -type f \( -name '*.dmg' -o -name '*.app' -o -name '*.exe' \) -print >&2 || true
               exit 1
             fi
-            cp "${files[@]}" dist-packages/
+            if [ "${#files[@]}" -ne 1 ]; then
+              echo "期望 1 个 DMG，实际 ${#files[@]}" >&2
+              printf '%s\n' "${files[@]}" >&2
+              exit 1
+            fi
+            version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+            # GitHub Release 会丢掉文件名里的非 ASCII 字符，附件用英文名。
+            cp "${files[0]}" "dist-packages/RailFolio_${version}_macos_universal.dmg"
           else
             shopt -s nullglob
             files=(src-tauri/target/release/bundle/nsis/*-setup.exe)
@@ -75,7 +82,13 @@ jobs:
               find src-tauri/target -type f \( -name '*.exe' -o -name '*.msi' \) -print >&2 || true
               exit 1
             fi
-            cp "${files[@]}" dist-packages/
+            if [ "${#files[@]}" -ne 1 ]; then
+              echo "期望 1 个安装包，实际 ${#files[@]}" >&2
+              printf '%s\n' "${files[@]}" >&2
+              exit 1
+            fi
+            version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+            cp "${files[0]}" "dist-packages/RailFolio_${version}_windows_x64-setup.exe"
           fi
           ls -lh dist-packages
 
@@ -134,8 +147,10 @@ jobs:
 
             ## 安装
 
-            - **macOS（Apple 芯片与 Intel）**：下载 `火车记_*_universal.dmg`，打开后把「火车记」拖到「应用程序」。安装包是 ad-hoc 签名，没有 Apple 公证。若系统提示已损坏或无法验证开发者，请右键应用选择「打开」，或到「系统设置 → 隐私与安全性」里点「仍要打开」。
-            - **Windows（64 位）**：下载 `火车记_*_x64-setup.exe`。安装包未签名，SmartScreen 可能提示未知发布者，选择「仍要运行」。安装时会按需下载 Microsoft Edge WebView2。
+            - **macOS（Apple 芯片与 Intel）**：下载 `RailFolio_*_macos_universal.dmg`，打开后把「火车记」拖到「应用程序」。安装包是 ad-hoc 签名，没有 Apple 公证。若系统提示已损坏或无法验证开发者，请右键应用选择「打开」，或到「系统设置 → 隐私与安全性」里点「仍要打开」。
+            - **Windows（64 位）**：下载 `RailFolio_*_windows_x64-setup.exe`。安装包未签名，SmartScreen 可能提示未知发布者，选择「仍要运行」。安装时会按需下载 Microsoft Edge WebView2。
+
+            应用显示名称是「火车记」。Release 附件使用英文文件名，避免下载名丢掉中文后变成 `_版本_...`。
 
             本机截图 OCR 目前只在 macOS 上可用（Vision）。Windows 版可以记行程、导入 JSON/CSV，并在应用内登录 12306 后同步订单。
 
