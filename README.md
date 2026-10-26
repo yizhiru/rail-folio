@@ -50,7 +50,7 @@ npm run package:win
 
 产物：`src-tauri/target/release/bundle/nsis/火车记_<版本>_x64-setup.exe`。安装时会按需下载 WebView2。
 
-推送 `v*` 标签（例如 `v1.1.0`）会走 `.github/workflows/release.yml`：macOS 通用 DMG 和 Windows 安装包打好后上传到同一个 GitHub Release。
+推送 `v*` 标签（例如 `v1.1.0`）会走 `.github/workflows/release.yml`，把 macOS 通用 DMG 和 Windows 安装包上传到同一个 GitHub Release。附件名是 `RailFolio_<版本>_macos_universal.dmg` 与 `RailFolio_<版本>_windows_x64-setup.exe`。应用里的名称仍是「火车记」。
 
 应用使用 ad-hoc 签名，没有 Apple 开发者证书公证，Windows 安装包也未签名。macOS 上首次打开若被 Gatekeeper 拦下，右键 → 打开，或在「系统设置 → 隐私与安全性」里点「仍要打开」。Windows 上 SmartScreen 可能提示未知发布者，选择仍要运行。要免提示需要各自平台的付费签名。
 
