@@ -1,17 +1,17 @@
 import { cityOfStation } from "../domain/city";
+import { addCalendarDays } from "../domain/dateLabel";
 import { formatDuration, arrivalDayOffset, tripDurationMin } from "../domain/duration";
 import { formatTicketPrice } from "../domain/price";
-import type { Station, TrainCategory, Trip } from "../domain/types";
+import type { Station, Trip } from "../domain/types";
+import { yearlyNewPlaces, type YearFootprint } from "./footprints";
 
-export type YearCount = {
-  year: string;
+export type YearCount = YearFootprint & {
   count: number;
   /** 该年已填票价的行程金额合计（元）；一条都没填时为空，图上断开而不是画成 0。 */
   spend?: number;
   /** 该年里填了票价的行程数，用来提示花费只覆盖了一部分。 */
   pricedCount: number;
 };
-export type CategoryCount = { category: TrainCategory; count: number };
 export type CityCount = { city: string; count: number; stations: string[] };
 export type StationCount = { name: string; count: number };
 export type RouteCount = {
@@ -36,13 +36,6 @@ function visitStamp(date: string, time?: string): string {
   const match = time ? /^(\d{1,2}):(\d{2})$/.exec(time.trim()) : null;
   const hhmm = match ? `${match[1].padStart(2, "0")}:${match[2]}` : "00:00";
   return `${date}T${hhmm}`;
-}
-
-function addCalendarDays(isoDate: string, days: number): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
-  if (!match) return isoDate;
-  const stamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days);
-  return new Date(stamp).toISOString().slice(0, 10);
 }
 
 function tripRecency(trip: Trip): string {
@@ -81,7 +74,6 @@ export type OverviewStats = {
   /** 同时有开车、到达时刻里耗时最长的一程；没有可计时长时为空。 */
   longestTrip?: DurationHighlight;
   byYear: YearCount[];
-  byCategory: CategoryCount[];
   topCities: CityCount[];
   topRoutes: RouteCount[];
 };
@@ -119,7 +111,6 @@ function routeCounts(trips: Trip[], stations: Station[]): RouteCount[] {
 export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStats {
   const stationMap = new Map(stations.map((station) => [station.id, station]));
   const years = new Map<string, { count: number; spend: number; pricedCount: number }>();
-  const categories = new Map<TrainCategory, number>();
   const cityCounts = new Map<string, CityAgg>();
   let knownMinutes = 0;
   let totalTicketPrice = 0;
@@ -148,7 +139,6 @@ export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStat
       yearAgg.pricedCount += 1;
     }
     years.set(year, yearAgg);
-    categories.set(trip.category, (categories.get(trip.category) ?? 0) + 1);
     const fromStamp = visitStamp(trip.date, trip.departureTime);
     const toDate = addCalendarDays(trip.date, arrivalDayOffset(trip));
     const toStamp = visitStamp(toDate, trip.arrivalTime ?? trip.departureTime);
@@ -219,17 +209,15 @@ export function summarizeTrips(trips: Trip[], stations: Station[]): OverviewStat
           ...tripStations(longestTrip, stationMap),
         }
       : undefined,
-    byYear: [...years.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([year, agg]) => ({
-        year,
-        count: agg.count,
-        spend: agg.pricedCount > 0 ? Math.round(agg.spend * 100) / 100 : undefined,
-        pricedCount: agg.pricedCount,
-      })),
-    byCategory: [...categories.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([category, count]) => ({ category, count })),
+    byYear: yearlyNewPlaces(trips, stations).map((footprint) => {
+      const agg = years.get(footprint.year);
+      return {
+        ...footprint,
+        count: agg?.count ?? 0,
+        spend: agg && agg.pricedCount > 0 ? Math.round(agg.spend * 100) / 100 : undefined,
+        pricedCount: agg?.pricedCount ?? 0,
+      };
+    }),
     topCities,
     topRoutes: routeCounts(trips, stations),
   };

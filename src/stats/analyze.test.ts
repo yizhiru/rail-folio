@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bundledStations } from "../assets/stations";
 import type { Trip } from "../domain/types";
-import { analyzeTrips, analyzeYear, sliceStats } from "./analyze";
+import { analyzeTrips, analyzeYear, listYears, sliceStats } from "./analyze";
 
 function trip(partial: Partial<Trip> & Pick<Trip, "id" | "date" | "trainNo" | "fromStationId" | "toStationId">): Trip {
   return {
@@ -68,7 +68,7 @@ describe("sliceStats", () => {
 });
 
 describe("analyzeTrips", () => {
-  it("breaks down year and category", () => {
+  it("breaks down trips by year", () => {
     const trips = [
       trip({
         id: "1",
@@ -99,11 +99,38 @@ describe("analyzeTrips", () => {
     const stats = analyzeTrips(trips, bundledStations);
     expect(stats.years).toEqual(["2025", "2024"]);
     expect(stats.byYear[1]).toMatchObject({ tripCount: 2, cityCount: 2, totalTicketPrice: 697.5 });
-    expect(stats.byCategory.map((item) => item.category)).toEqual(["G", "C"]);
   });
 });
 
 describe("analyzeYear", () => {
+  it("counts new places against the whole archive rather than only the selected year", () => {
+    const shanghai = bundledStations.find((station) => station.name === "上海")!;
+    const trips = [
+      trip({ id: "new", date: "2025-02-01", trainNo: "G2", fromStationId: shanghai.id, toStationId: njh.id }),
+      trip({ id: "old", date: "2024-02-01", trainNo: "G1", fromStationId: aoh.id, toStationId: njh.id }),
+    ];
+    expect(analyzeYear(trips, bundledStations, "2025")).toMatchObject({ newCityCount: 0, newStationCount: 1 });
+    expect(analyzeYear(trips, bundledStations, "2024")).toMatchObject({ newCityCount: 2, newStationCount: 2 });
+    expect(analyzeYear(trips, bundledStations, "2023")).toMatchObject({ newCityCount: 0, newStationCount: 0 });
+    expect(analyzeTrips(trips, bundledStations).byYear[0]).toMatchObject({
+      year: "2025", newCityCount: 0, newStationCount: 1,
+    });
+  });
+
+  it("includes a year with only a first arrival after New Year", () => {
+    const trips = [trip({
+      id: "1", date: "2024-12-31", trainNo: "G1", fromStationId: aoh.id, toStationId: njh.id,
+      departureTime: "23:00", arrivalTime: "01:00",
+    })];
+    expect(listYears(trips, bundledStations)).toEqual(["2025", "2024"]);
+    const view = analyzeYear(trips, bundledStations, "2025");
+    expect(view).toMatchObject({ newCityCount: 1, newStationCount: 1, slice: { tripCount: 0 } });
+    expect(view.byMonth.every((month) => month.count === 0)).toBe(true);
+    expect(analyzeTrips(trips, bundledStations).byYear[0]).toMatchObject({
+      year: "2025", tripCount: 0, newCityCount: 1, newStationCount: 1,
+    });
+  });
+
   it("limits charts to the selected year", () => {
     const trips = [
       trip({
@@ -130,7 +157,6 @@ describe("analyzeYear", () => {
     expect(view.slice.tripCount).toBe(1);
     expect(view.slice.cityCount).toBe(2);
     expect(view.slice.durationLabel).toBe("1 h 2 min");
-    expect(view.byCategory.map((item) => item.category)).toEqual(["G"]);
     expect(view.topCities.map((item) => item.city).sort()).toEqual(["上海", "南京"]);
     expect(view.byMonth).toHaveLength(12);
     expect(view.byMonth[1]).toEqual({ month: 2, label: "2月", count: 1 });

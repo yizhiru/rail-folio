@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { YearCount } from "../../stats/summarize";
 import {
   buildYearCountOption,
+  buildYearFootprintOption,
   buildYearSpendOption,
   fillYearGaps,
   formatSpendAxis,
@@ -12,15 +13,27 @@ import {
 } from "./yearChart";
 
 const years: YearCount[] = [
-  { year: "2023", count: 3, spend: 300.3, pricedCount: 2 },
-  { year: "2024", count: 1, spend: undefined, pricedCount: 0 },
-  { year: "2025", count: 2, spend: 1200, pricedCount: 2 },
+  { year: "2023", count: 3, spend: 300.3, pricedCount: 2, newCityCount: 2, newStationCount: 3 },
+  { year: "2024", count: 1, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0 },
+  { year: "2025", count: 2, spend: 1200, pricedCount: 2, newCityCount: 2, newStationCount: 3 },
 ];
 
 type Series = Array<{ type: string; data: Array<number | null> }>;
 type Option = { tooltip: { formatter: (raw: unknown) => string }; xAxis: { data: string[] } };
 
 describe("year charts", () => {
+  it("shows new cities and stations on the shared year window, including zero-filled gaps", () => {
+    const filled = fillYearGaps([years[0], years[2]]);
+    const option = buildYearFootprintOption(yearWindow(filled, 0).years);
+    expect((option.series as Series).map((item) => item.data)).toEqual([[2, 0, 2], [3, 0, 3]]);
+    const tip = (option as unknown as Option).tooltip.formatter;
+    expect(tip([{ dataIndex: 1 }])).toBe("2024 年<br/>新增城市 0 座<br/>新增车站 0 个");
+    expect(tip([{ dataIndex: 0 }])).toBe("2023 年<br/>新增城市 2 座<br/>新增车站 3 个");
+    const all = span(2000, 2024);
+    const older = buildYearFootprintOption(yearWindow(all, 1).years);
+    expect((older as unknown as Option).xAxis.data).toEqual(span(2000, 2008).map((year) => year.year));
+  });
+
   it("draws counts and spend as two bar charts on the same years", () => {
     const counts = buildYearCountOption(years);
     const spend = buildYearSpendOption(years);
@@ -51,7 +64,7 @@ describe("year charts", () => {
 describe("hasYearSpend / spendSummary", () => {
   it("detects whether any year has a fare", () => {
     expect(hasYearSpend(years)).toBe(true);
-    expect(hasYearSpend(years.map((item) => ({ ...item, spend: undefined, pricedCount: 0 })))).toBe(false);
+    expect(hasYearSpend(years.map((item) => ({ ...item, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0 })))).toBe(false);
   });
 
   it("writes just the total, and nothing when no fare was filled in", () => {
@@ -74,24 +87,26 @@ const span = (from: number, to: number): YearCount[] =>
     count: 1,
     spend: 10,
     pricedCount: 1,
+    newCityCount: 1,
+    newStationCount: 1,
   }));
 
 describe("fillYearGaps", () => {
   it("fills years without trips so the axis stays continuous", () => {
     const filled = fillYearGaps([
-      { year: "2018", count: 2, spend: 50, pricedCount: 1 },
-      { year: "2021", count: 1, spend: undefined, pricedCount: 0 },
+      { year: "2018", count: 2, spend: 50, pricedCount: 1, newCityCount: 1, newStationCount: 1 },
+      { year: "2021", count: 1, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0 },
     ]);
     expect(filled.map((item) => item.year)).toEqual(["2018", "2019", "2020", "2021"]);
-    expect(filled[1]).toEqual({ year: "2019", count: 0, spend: undefined, pricedCount: 0 });
+    expect(filled[1]).toEqual({ year: "2019", count: 0, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0 });
     expect(filled[0].count).toBe(2);
   });
 
   it("leaves a single year alone, and says there was no trip in an empty year", () => {
-    expect(fillYearGaps([{ year: "2024", count: 1, spend: 1, pricedCount: 1 }])).toHaveLength(1);
+    expect(fillYearGaps([{ year: "2024", count: 1, spend: 1, pricedCount: 1, newCityCount: 1, newStationCount: 1 }])).toHaveLength(1);
     const gap = fillYearGaps([
-      { year: "2018", count: 1, spend: 1, pricedCount: 1 },
-      { year: "2020", count: 1, spend: 1, pricedCount: 1 },
+      { year: "2018", count: 1, spend: 1, pricedCount: 1, newCityCount: 1, newStationCount: 1 },
+      { year: "2020", count: 1, spend: 1, pricedCount: 1, newCityCount: 1, newStationCount: 1 },
     ]);
     const tip = (buildYearSpendOption(gap) as unknown as Option).tooltip.formatter;
     expect(tip([{ dataIndex: 1 }])).toBe("2019 年<br/>没有出行");

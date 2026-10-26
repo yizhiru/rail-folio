@@ -54,7 +54,7 @@ describe("tripLines", () => {
     expect(tripLines(archive.trips, bundledStations, "station")).toHaveLength(archive.trips.length);
   });
 
-  it("records first / last date and the category mix per direction", () => {
+  it("records first / last date per direction", () => {
     const lines = tripLines(
       [
         trip({ fromStationId: "AOH", toStationId: "NJH", date: "2024-03-02" }),
@@ -67,7 +67,6 @@ describe("tripLines", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].firstDate).toBe("2023-11-20");
     expect(lines[0].lastDate).toBe("2025-01-05");
-    expect(lines[0].categories).toEqual({ G: 2, D: 1 });
   });
 });
 
@@ -241,7 +240,6 @@ describe("buildMapGraph", () => {
     expect([...graph.nodes.keys()].sort()).toEqual(["city:上海", "city:杭州"]);
     const out = graph.lines.find((line) => line.fromId === "city:上海");
     expect(out).toMatchObject({ fromName: "上海", toName: "杭州", count: 3 });
-    expect(out?.categories).toEqual({ G: 2, D: 1 });
     expect(out?.fromStations.sort()).toEqual(["上海南", "上海虹桥"]);
     expect(out?.toStations.sort()).toEqual(["杭州", "杭州东"]);
     expect(graph.lines.find((line) => line.fromId === "city:杭州")?.count).toBe(1);

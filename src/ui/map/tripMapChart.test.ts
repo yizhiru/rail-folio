@@ -217,3 +217,55 @@ describe("city granularity", () => {
     ]);
   });
 });
+
+describe("map labels", () => {
+  it("uses distinct city and station symbols while keeping every visit interactive", () => {
+    const trips = [trip({ fromStationId: "HGH", toStationId: "AOH" })];
+    for (const granularity of ["city", "station"] as const) {
+      const series = buildMapSeries(trips, bundledStations, { granularity });
+      const points = series[1] as {
+        symbol: string; data: Array<{ id: string; lineIndices: number[] }>;
+        itemStyle: { color: string }; symbolSize: (value: number[]) => number;
+      };
+      expect(points.symbol).toBe(granularity === "city" ? "circle" : "roundRect");
+      expect(points.itemStyle.color).toBe("#82c9c2");
+      expect(points.data).toHaveLength(2);
+      expect(new Set(points.data.map((point) => point.id)).size).toBe(2);
+      for (const point of points.data) expect(point.lineIndices).toEqual([0]);
+      expect(points.symbolSize([0, 0, 100])).toBeLessThanOrEqual(10);
+      expect((series[2] as { data: unknown[] }).data).toEqual([]);
+    }
+  });
+
+  it("adds noninteractive halos only to the top three above-median places", () => {
+    const stations = Array.from({ length: 12 }, (_, i) => ({
+      id: `s${i}`, name: `站${i}`, city: `城${i}`, lng: 90 + i, lat: 30 + i / 3,
+    }));
+    const trips = stations.slice(1).flatMap((station, i) =>
+      Array.from({ length: i < 4 ? 14 - i : 1 }, () => trip({ fromStationId: "s0", toStationId: station.id })));
+    for (const granularity of ["city", "station"] as const) {
+      const series = buildMapSeries(trips, stations, { granularity });
+      const points = (series[1] as { data: Array<{ name: string; label: { show: boolean } }> }).data;
+      const halos = series[2] as { silent: boolean; data: Array<{ name: string }> };
+      expect(points).toHaveLength(12);
+      expect(halos.silent).toBe(true);
+      expect(halos.data.map((point) => point.name)).toEqual(
+        [0, 1, 2].map((i) => `${granularity === "city" ? "城" : "站"}${i}`),
+      );
+      for (const halo of halos.data) expect(points.some((p) => p.name === halo.name)).toBe(true);
+    }
+  });
+
+  it("uses projected layout without dropping points or changing share labels", () => {
+    const stations = Array.from({ length: 20 }, (_, i) => ({ id: `s${i}`, name: `站${i}`, city: `城${i}`, lng: 90 + i, lat: 30 + i / 3 }));
+    const trips = stations.slice(1).map((station) => trip({ fromStationId: "s0", toStationId: station.id }));
+    const viewport = { width: 800, height: 500, zoom: 1.15, project: ([lng]: [number, number]) => [100 + (lng - 90) * 10, 200] };
+    const pointsAt = (share = false) => (buildMapSeries(trips, stations, { granularity: "city", labelViewport: viewport, share })[1] as {
+      data: Array<{ name: string; label: { show: boolean } }>;
+    }).data;
+    expect(pointsAt()).toHaveLength(20);
+    expect(pointsAt().filter((p) => p.label.show).length).toBeLessThan(20);
+    expect(pointsAt().find((p) => p.name === "城0")?.label.show).toBe(true);
+    expect(pointsAt(true).filter((p) => p.label.show)).toHaveLength(8);
+  });
+});

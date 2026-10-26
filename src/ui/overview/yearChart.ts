@@ -17,7 +17,9 @@ export function fillYearGaps(years: YearCount[]): YearCount[] {
   const byYear = new Map(years.map((item) => [Number(item.year), item]));
   const filled: YearCount[] = [];
   for (let year = Math.min(...numbers); year <= Math.max(...numbers); year += 1) {
-    filled.push(byYear.get(year) ?? { year: String(year), count: 0, spend: undefined, pricedCount: 0 });
+    filled.push(byYear.get(year) ?? {
+      year: String(year), count: 0, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0,
+    });
   }
   return filled;
 }
@@ -106,6 +108,36 @@ export function buildYearCountOption(years: YearCount[]): EChartsOption {
         data: years.map((item) => item.count),
         itemStyle: { color: COUNT_COLOR, borderRadius: [6, 6, 0, 0] },
         barMaxWidth: 36,
+      },
+    ],
+  };
+}
+
+/** 年度新增足迹：两组柱分别显示首次到访的城市、车站数。 */
+export function buildYearFootprintOption(years: YearCount[]): EChartsOption {
+  return {
+    ...baseOption(years),
+    tooltip: {
+      trigger: "axis",
+      formatter: tooltipFor(years, (item) =>
+        `新增城市 ${item.newCityCount} 座<br/>新增车站 ${item.newStationCount} 个`,
+      ) as never,
+    },
+    yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: AXIS } } },
+    series: [
+      {
+        name: "新增城市",
+        type: "bar",
+        data: years.map((item) => item.newCityCount),
+        itemStyle: { color: COUNT_COLOR, borderRadius: [6, 6, 0, 0] },
+        barMaxWidth: 28,
+      },
+      {
+        name: "新增车站",
+        type: "bar",
+        data: years.map((item) => item.newStationCount),
+        itemStyle: { color: SPEND_COLOR, borderRadius: [6, 6, 0, 0] },
+        barMaxWidth: 28,
       },
     ],
   };

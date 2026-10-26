@@ -1,4 +1,4 @@
-import { TRAIN_CATEGORIES, TRAIN_CATEGORY_LABEL } from "../../domain/types";
+import { layoutMapLabels, type LabelPosition, type LabelViewport } from "./mapLabels";
 import type { Station, Trip } from "../../domain/types";
 import {
   buildMapGraph,
@@ -49,7 +49,6 @@ type LineDatum = {
   count: number;
   firstDate: string;
   lastDate: string;
-  categories: TripLine["categories"];
   fromStations: string[];
   toStations: string[];
   lineStyle: { color: string; width: number; opacity: number; curveness: number };
@@ -57,6 +56,7 @@ type LineDatum = {
 };
 
 type PointDatum = {
+  id: string;
   name: string;
   value: [number, number, number];
   departures: number;
@@ -65,6 +65,7 @@ type PointDatum = {
   stations: MapNode["stations"];
   /** 与该点相连的线在线系列里的下标，悬停时用来高亮。 */
   lineIndices: number[];
+  label?: { show: boolean; position?: LabelPosition };
 };
 
 type DrawableLine = TripLine & { coords: [number, number][]; curveness: number };
@@ -95,11 +96,11 @@ function dateRange(first: string, last: string): string {
   return first === last ? first : `首次 ${first} · 最近 ${last}`;
 }
 
-function categoryBreakdown(categories: TripLine["categories"]): string {
-  return TRAIN_CATEGORIES.flatMap((category) => {
-    const count = categories[category];
-    return count ? [`${TRAIN_CATEGORY_LABEL[category]} ${count}`] : [];
-  }).join(" · ");
+/** All text is escaped before entering these presentation wrappers. */
+function tooltipRows(rows: string[]): string {
+  return rows.map((row, index) => `<div style="${index === 0
+    ? "color:#eeeae1;font-weight:600;font-size:13px;margin-bottom:6px"
+    : "color:#a7b9c8;font-size:12px;margin-top:4px"}">${row}</div>`).join("");
 }
 
 function lineTooltip(data: LineDatum): string {
@@ -107,15 +108,13 @@ function lineTooltip(data: LineDatum): string {
     `${escapeHtml(data.fromName)} → ${escapeHtml(data.toName)}`,
     `${data.count} 次 · ${escapeHtml(dateRange(data.firstDate, data.lastDate))}`,
   ];
-  const breakdown = categoryBreakdown(data.categories);
-  if (breakdown) rows.push(escapeHtml(breakdown));
   // 城市粒度下，补一行实际走过的车站；与节点同名时不重复。
   const from = data.fromStations.join("、");
   const to = data.toStations.join("、");
   if (from !== data.fromName || to !== data.toName) {
     rows.push(`车站：${escapeHtml(from)} → ${escapeHtml(to)}`);
   }
-  return rows.join("<br/>");
+  return tooltipRows(rows);
 }
 
 const TOOLTIP_STATION_LIMIT = 5;
@@ -135,7 +134,7 @@ function pointTooltip(data: PointDatum): string {
       data.stations.length > TOOLTIP_STATION_LIMIT ? ` 等 ${data.stations.length} 站` : "";
     rows.push(`车站：${escapeHtml(shown)}${more}`);
   }
-  return rows.join("<br/>");
+  return tooltipRows(rows);
 }
 
 export type MapSeriesOptions = {
@@ -144,6 +143,8 @@ export type MapSeriesOptions = {
   share?: boolean;
   /** 随缩放的大小系数（1 为默认视野），分享图固定为 1。 */
   scale?: number;
+  /** 当前投影和可用空间，用于自适应地名布局。 */
+  labelViewport?: LabelViewport;
 };
 
 export function buildMapSeries(
@@ -184,6 +185,7 @@ export function buildMapSeries(
     if (node.lng == null || node.lat == null) return [];
     return [
       {
+        id: node.id,
         name: node.name,
         value: [node.lng, node.lat, node.departures + node.arrivals || 1] as [number, number, number],
         departures: node.departures,
@@ -193,6 +195,31 @@ export function buildMapSeries(
       },
     ];
   });
+
+  const ranked = [...points].sort((a, b) =>
+    b.value[2] - a.value[2] || a.name.localeCompare(b.name, "zh-CN"));
+  // Only a few genuinely frequent places glow; equally visited places stay neutral.
+  const medianVisits = ranked.length ? ranked[Math.floor(ranked.length / 2)].value[2] : 0;
+  const hubs = ranked.filter((point) => point.value[2] >= 2 && point.value[2] > medianVisits).slice(0, 3);
+  const symbol = options.granularity === "city" ? "circle" : "roundRect";
+  const pointSize = (value: number[]) => (share
+    ? Math.min(20, 8 + Math.sqrt(value[2]) * 1.5)
+    : Math.min(10, 5.5 + Math.sqrt(value[2]) * 0.7) * sizeScale);
+
+  if (!share && options.labelViewport) {
+    const viewport = options.labelViewport;
+    const labels = layoutMapLabels(points.map((point) => {
+      const [x, y] = viewport.project([point.value[0], point.value[1]]);
+      return { id: point.id, name: point.name, x, y, visits: point.value[2], radius: pointSize(point.value) / 2 };
+    }), viewport);
+    for (const point of points) {
+      point.label = { show: labels.has(point.id), position: labels.get(point.id) ?? "right" };
+    }
+  } else {
+    // 分享图保持精简；交互地图待投影就绪后再计算布局。
+    const labelled = new Set(ranked.slice(0, share ? 8 : 0).map((point) => point.id));
+    for (const point of points) point.label = { show: labelled.has(point.id) };
+  }
 
   return [
     {
@@ -215,25 +242,53 @@ export function buildMapSeries(
       zlevel: 3,
       data: points,
       silent: share,
-      symbolSize: (value: number[]) =>
-        share
-          ? Math.min(22, 10 + value[2] * 0.7)
-          : Math.min(8, 3.5 + value[2] * 0.4) * sizeScale,
+      symbol,
+      symbolSize: pointSize,
       itemStyle: {
-        color: "rgba(210, 198, 176, 0.82)",
-        borderColor: "rgba(154, 142, 122, 0.65)",
-        borderWidth: share ? 1.6 : 0.7,
+        color: "#82c9c2",
+        opacity: 0.95,
+        borderColor: "#172b38",
+        borderWidth: share ? 1 : 0.6,
       },
-      // 悬停时放大并提亮，补偿小圆点难以命中的问题。
-      emphasis: share
-        ? undefined
-        : { scale: 1.9, itemStyle: { color: "#fff3d6", borderColor: "#fff3d6" } },
-      label: { show: false },
+      emphasis: share ? undefined : {
+        scale: 1.35,
+        itemStyle: { color: "#fff1d6", borderColor: "#fff1d6", opacity: 1 },
+        label: { show: true, color: "#fff1d6" },
+      },
+      label: {
+        show: false,
+        formatter: "{b}",
+        position: "right",
+        distance: share ? 8 : 6,
+        color: "#c3cfce",
+        fontSize: share ? 23 : 11,
+        fontFamily: "PingFang SC, sans-serif",
+        textBorderColor: "#13202c",
+        textBorderWidth: share ? 4 : 3,
+      },
+      labelLayout: { hideOverlap: true },
       tooltip: share
         ? { show: false }
         : {
             formatter: (params) => pointTooltip((params as unknown as { data: PointDatum }).data),
           },
+    },
+    {
+      type: "scatter",
+      coordinateSystem: "geo",
+      zlevel: 2,
+      z: 1,
+      data: hubs.map((point) => ({ name: point.name, value: point.value })),
+      silent: true,
+      symbol,
+      symbolSize: (value: number[]) => pointSize(value) * 2.6,
+      itemStyle: {
+        color: "rgba(130, 201, 194, 0.10)",
+        shadowBlur: share ? 18 : 10,
+        shadowColor: "rgba(130, 201, 194, 0.3)",
+      },
+      tooltip: { show: false },
+      emphasis: { disabled: true },
     },
   ];
 }
@@ -275,9 +330,9 @@ export function geoOption(overrides: Partial<GeoComponentOption> = {}): GeoCompo
     ],
     silent: true,
     itemStyle: {
-      areaColor: "#243449",
-      borderColor: "#5b7694",
-      borderWidth: 0.7,
+      areaColor: "#1b2b3b",
+      borderColor: "#354a5e",
+      borderWidth: 0.5,
     },
     emphasis: {
       disabled: true,
@@ -294,13 +349,18 @@ export function geoOption(overrides: Partial<GeoComponentOption> = {}): GeoCompo
 export function mapFrame(share = false, geoOverrides: Partial<GeoComponentOption> = {}) {
   return {
     backgroundColor: "#0b1018",
+    animationDurationUpdate: 0,
     tooltip: share
       ? { show: false }
       : {
           trigger: "item" as const,
-          backgroundColor: "#f4efe4",
-          borderColor: "#d6cbb8",
-          textStyle: { color: "#1a120c" },
+          backgroundColor: "rgba(18, 30, 43, 0.97)",
+          borderColor: "#354a5e",
+          borderWidth: 1,
+          padding: [12, 14],
+          confine: true,
+          extraCssText: "border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.24);max-width:320px;white-space:normal;line-height:1.6;",
+          textStyle: { color: "#c3cfce" },
         },
     geo: geoOption(geoOverrides),
   };

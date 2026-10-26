@@ -1,6 +1,6 @@
 [package]
 name = "rail-folio"
-version = "1.0.0"
+version = "1.1.0"
 description = "火车记：本机个人铁路行程记录"
 authors = ["you"]
 edition = "2021"

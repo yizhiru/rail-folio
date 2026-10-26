@@ -1,17 +1,18 @@
 import * as echarts from "echarts/core";
-import { BarChart, LinesChart, PieChart, ScatterChart } from "echarts/charts";
+import { BarChart, LinesChart, ScatterChart } from "echarts/charts";
 import { GeoComponent, GridComponent, TooltipComponent } from "echarts/components";
+import { LabelLayout } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 
 echarts.use([
   BarChart,
-  PieChart,
   LinesChart,
   ScatterChart,
   GeoComponent,
   GridComponent,
   TooltipComponent,
   CanvasRenderer,
+  LabelLayout,
 ]);
 
 export { echarts };

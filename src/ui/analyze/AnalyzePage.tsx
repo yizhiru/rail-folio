@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatTicketPrice } from "../../domain/price";
-import { TRAIN_CATEGORY_LABEL, type Station, type TrainCategory, type Trip } from "../../domain/types";
-import { CATEGORY_COLORS } from "../charts/categoryColors";
+import type { Station, Trip } from "../../domain/types";
 import {
   analyzeYear,
   listYears,
@@ -21,44 +19,6 @@ type Props = {
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-}
-
-type CategoryMetric = "count" | "price";
-
-function categoryPieOption(
-  items: Array<{ category: TrainCategory; value: number }>,
-  formatValue: (value: number) => string,
-): EChartsOption {
-  return {
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "item",
-      formatter: (raw) => {
-        const item = (Array.isArray(raw) ? raw[0] : raw) as {
-          name?: string;
-          value?: number;
-          percent?: number;
-        };
-        const name = escapeHtml(String(item.name ?? ""));
-        const value = Number(item.value ?? 0);
-        const percent = item.percent == null ? "" : `<br/>${item.percent}%`;
-        return `${name}<br/>${escapeHtml(formatValue(value))}${percent}`;
-      },
-    },
-    series: [
-      {
-        type: "pie",
-        radius: ["40%", "64%"],
-        data: items.map((item) => ({
-          name: TRAIN_CATEGORY_LABEL[item.category],
-          value: item.value,
-          itemStyle: { color: CATEGORY_COLORS[item.category] },
-        })),
-        label: { color: "#ece7dc", fontSize: 11 },
-        labelLine: { length: 6, length2: 8 },
-      },
-    ],
-  };
 }
 
 function yearCharts(view: YearView) {
@@ -115,25 +75,13 @@ function yearCharts(view: YearView) {
     ],
   };
 
-  const pieOption = categoryPieOption(
-    view.byCategory.map((item) => ({ category: item.category, value: item.tripCount })),
-    (value) => `${value} 次`,
-  );
-  const pricePieOption = categoryPieOption(
-    view.byCategory
-      .filter((item) => item.totalTicketPrice > 0)
-      .map((item) => ({ category: item.category, value: item.totalTicketPrice })),
-    formatTicketPrice,
-  );
-
-  return { monthOption, cityOption, pieOption, pricePieOption };
+  return { monthOption, cityOption };
 }
 
 export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
-  const years = useMemo(() => listYears(trips), [trips]);
+  const years = useMemo(() => listYears(trips, stations), [trips, stations]);
   const [year, setYear] = useState(years[0] ?? "");
   const [granularity, setGranularity] = useMapGranularity();
-  const [categoryMetric, setCategoryMetric] = useState<CategoryMetric>("count");
   const yearTrips = useMemo(
     () => (year ? trips.filter((trip) => trip.date.slice(0, 4) === year) : []),
     [trips, year],
@@ -180,7 +128,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
       </div>
 
       {slice ? (
-        <div className="cards cards-4">
+        <div className="cards cards-6">
           <article className="card">
             <div className="label">乘车次数</div>
             <div className="value">{slice.tripCount}</div>
@@ -200,6 +148,14 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
               <div className="hint">已填 {slice.pricedTripCount} 条</div>
             ) : null}
           </article>
+          <article className="card">
+            <div className="label">新增城市</div>
+            <div className="value">{yearView?.newCityCount ?? 0}</div>
+          </article>
+          <article className="card">
+            <div className="label">新增车站</div>
+            <div className="value">{yearView?.newStationCount ?? 0}</div>
+          </article>
         </div>
       ) : null}
 
@@ -215,7 +171,7 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
       ) : null}
 
       {charts ? (
-        <div className="grid-3">
+        <div className="grid-stats">
           <article className="card">
             <div className="label">月度出行</div>
             {yearView && yearView.slice.tripCount === 0 ? (
@@ -230,39 +186,6 @@ export function AnalyzePage({ trips, stations, onLoadDemo }: Props) {
               <div className="muted">这一年还没有行程</div>
             ) : (
               <EChart option={charts.cityOption} className="chart-wrap" />
-            )}
-          </article>
-          <article className="card">
-            <div className="card-head">
-              <div className="label">车型占比</div>
-              <div className="seg" role="group" aria-label="车型统计口径">
-                <button
-                  type="button"
-                  className={categoryMetric === "count" ? "active" : undefined}
-                  aria-pressed={categoryMetric === "count"}
-                  onClick={() => setCategoryMetric("count")}
-                >
-                  次数
-                </button>
-                <button
-                  type="button"
-                  className={categoryMetric === "price" ? "active" : undefined}
-                  aria-pressed={categoryMetric === "price"}
-                  onClick={() => setCategoryMetric("price")}
-                >
-                  金额
-                </button>
-              </div>
-            </div>
-            {yearView && yearView.byCategory.length === 0 ? (
-              <div className="muted">这一年还没有行程</div>
-            ) : categoryMetric === "price" && yearView && yearView.slice.pricedTripCount === 0 ? (
-              <div className="muted">这一年还没有填写票价</div>
-            ) : (
-              <EChart
-                option={categoryMetric === "price" ? charts.pricePieOption : charts.pieOption}
-                className="chart-wrap"
-              />
             )}
           </article>
         </div>

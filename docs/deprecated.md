@@ -12,3 +12,7 @@
 
 - `CRPassengerMileage.pyetlib`：上述 qETRC 原始线路数据库（pyETRC/qETRC 的 JSON 格式）。
 - `PriceCpp-adj.txt`：[CDK6182CHR/PriceCpp](https://github.com/CDK6182CHR/PriceCpp) 的客里表邻接表，格式为 `线名 起点 终点 区间里程`，版本更早，仅作对照。
+
+## 车型统计
+
+总览、分析中的车型次数 / 金额占比，以及地图线路提示中的车型分布已下线。车次编号口径随时期变化，直接按首字母归类无法可靠比较历史行程。现有档案中的车型字段继续保留，用于兼容旧数据与行程列表筛选。

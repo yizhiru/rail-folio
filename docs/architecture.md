@@ -13,7 +13,7 @@
 | React | 19.1 | UI |
 | TypeScript | 5.8 | 前端类型与业务逻辑 |
 | Vite | 7.1 | 开发服务器与前端打包 |
-| ECharts | 6.1 | 总览地图（geo + lines/scatter）、年次与车型图 |
+| ECharts | 6.1 | 总览地图（geo + lines/scatter）、年度出行、花费与新增足迹图 |
 | Vitest | 3.2 | 纯逻辑单元测试（Node 环境） |
 
 根目录的 `package.json`、`tsconfig.json`、`vite.config.ts`、`vitest.config.ts` 是给这些工具读的配置，不是业务代码。
@@ -113,7 +113,7 @@ Station { id /* 电报码 */, name, city, province?, lng?, lat? }
 | 页 | 做什么 |
 |---|---|
 | 总览 | 次数、车站数、城市数、乘车时长；ECharts 地图与图表；常坐线路 |
-| 分析 | 按年切换地图与图表；车型饼图可切换次数 / 金额 |
+| 分析 | 按年切换地图、月度出行与常去城市图表，展示新增城市与车站数 |
 | 行程 | 列表、筛选、编辑、删除 |
 | 导入 | 图片 OCR、文件夹、拖放、12306 同步 → 核对表；确认入库仅在有草稿后出现 |
 | 录入 | 手工一条；智能导入 |

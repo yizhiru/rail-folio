@@ -3,8 +3,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { isTauri, writeBinaryFile } from "../../data/repository";
 import { formatDateCn } from "../../domain/dateLabel";
 import { formatTicketPrice } from "../../domain/price";
-import { TRAIN_CATEGORY_LABEL, type Station, type Trip } from "../../domain/types";
-import { CATEGORY_COLORS } from "../charts/categoryColors";
+import type { Station, Trip } from "../../domain/types";
 import { summarizeTrips, type OverviewStats } from "../../stats/summarize";
 import { EChart } from "../charts/EChart";
 import type { EChartsOption } from "../charts/echarts";
@@ -15,6 +14,7 @@ import { TripMap } from "../map/TripMap";
 import { useMapGranularity } from "../map/useMapGranularity";
 import {
   buildYearCountOption,
+  buildYearFootprintOption,
   buildYearSpendOption,
   hasYearSpend,
   spendSummary,
@@ -64,24 +64,6 @@ function escapeHtml(value: string): string {
 }
 
 function buildOptions(stats: OverviewStats) {
-  const pieOption: EChartsOption = {
-    backgroundColor: "transparent",
-    tooltip: { trigger: "item" },
-    series: [
-      {
-        type: "pie",
-        radius: ["40%", "64%"],
-        data: stats.byCategory.map((item) => ({
-          name: TRAIN_CATEGORY_LABEL[item.category],
-          value: item.count,
-          itemStyle: { color: CATEGORY_COLORS[item.category] },
-        })),
-        label: { color: "#ece7dc", fontSize: 11 },
-        labelLine: { length: 6, length2: 8 },
-      },
-    ],
-  };
-
   const cityOption: EChartsOption = {
     backgroundColor: "transparent",
     tooltip: {
@@ -117,19 +99,20 @@ function buildOptions(stats: OverviewStats) {
     ],
   };
 
-  return { pieOption, cityOption };
+  return { cityOption };
 }
 
 export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
   const stats = useMemo(() => summarizeTrips(trips, stations), [trips, stations]);
   const [granularity, setGranularity] = useMapGranularity();
-  const { pieOption, cityOption } = useMemo(() => buildOptions(stats), [stats]);
-  // 年度两张图共用一个年份窗口：最近 16 年，更早的往前翻。
+  const { cityOption } = useMemo(() => buildOptions(stats), [stats]);
+  // 年度三张图共用一个年份窗口：最近 16 年，更早的往前翻。
   const [yearPage, setYearPage] = useState(0);
   const yearView = useMemo(() => yearWindow(stats.byYear, yearPage), [stats.byYear, yearPage]);
   const yearCountOption = useMemo(() => buildYearCountOption(yearView.years), [yearView.years]);
   const spendLabel = spendSummary(stats.totalTicketPrice, stats.pricedTripCount);
   const yearSpendOption = useMemo(() => buildYearSpendOption(yearView.years), [yearView.years]);
+  const yearFootprintOption = useMemo(() => buildYearFootprintOption(yearView.years), [yearView.years]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const shareBlobRef = useRef<Blob | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
@@ -314,13 +297,19 @@ export function OverviewPage({ trips, stations, onLoadDemo }: Props) {
             <div className="muted chart-empty">还没有填写票价的行程</div>
           )}
         </article>
+        <article className="card">
+          <div className="card-head year-head">
+            <div className="label">年度新增足迹</div>
+            <div className="new-places-legend">
+              <span><i className="new-places-city" aria-hidden="true" />新增城市</span>
+              <span><i className="new-places-station" aria-hidden="true" />新增车站</span>
+            </div>
+          </div>
+          <EChart option={yearFootprintOption} className="chart-wrap" />
+        </article>
       </div>
 
-      <div className="grid-3">
-        <article className="card">
-          <div className="label">车型占比</div>
-          <EChart option={pieOption} className="chart-wrap" />
-        </article>
+      <div className="grid-stats">
         <article className="card">
           <div className="label">常去城市</div>
           <EChart option={cityOption} className="chart-wrap" />

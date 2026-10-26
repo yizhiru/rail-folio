@@ -1,7 +1,7 @@
 import { cityOfStation } from "../domain/city";
-import type { Station, TrainCategory, Trip } from "../domain/types";
+import type { Station, Trip } from "../domain/types";
 
-const MAP_LINE_COLOR = "#6fe6d2";
+const MAP_LINE_COLOR = "#82c9c2";
 
 export type TripLine = {
   fromId: string;
@@ -12,8 +12,6 @@ export type TripLine = {
   /** 这个方向上最早 / 最近一次的乘车日期（YYYY-MM-DD）。 */
   firstDate: string;
   lastDate: string;
-  /** 各车型的次数，只含出现过的车型。 */
-  categories: Partial<Record<TrainCategory, number>>;
   /** 这条线实际涉及的出发 / 到达车站名；城市粒度下可能不止一个。 */
   fromStations: string[];
   toStations: string[];
@@ -34,9 +32,9 @@ export type LineCountBreaks = {
 };
 
 const LINE_BY_TIER: Record<LineTier, { width: number; opacity: number }> = {
-  low: { width: 1, opacity: 0.55 },
-  mid: { width: 1.65, opacity: 0.74 },
-  high: { width: 2.4, opacity: 0.92 },
+  low: { width: 1.05, opacity: 0.48 },
+  mid: { width: 1.5, opacity: 0.65 },
+  high: { width: 2.15, opacity: 0.86 },
 };
 
 const NO_BREAKS: LineCountBreaks = {
@@ -267,7 +265,6 @@ export function buildMapGraph(
       existing.count += 1;
       if (trip.date < existing.firstDate) existing.firstDate = trip.date;
       if (trip.date > existing.lastDate) existing.lastDate = trip.date;
-      existing.categories[trip.category] = (existing.categories[trip.category] ?? 0) + 1;
       if (!existing.fromStations.includes(fromStation)) existing.fromStations.push(fromStation);
       if (!existing.toStations.includes(toStation)) existing.toStations.push(toStation);
     } else {
@@ -279,7 +276,6 @@ export function buildMapGraph(
         count: 1,
         firstDate: trip.date,
         lastDate: trip.date,
-        categories: { [trip.category]: 1 },
         fromStations: [fromStation],
         toStations: [toStation],
       });

@@ -1,8 +1,9 @@
 import { cityOfStation } from "../domain/city";
 import { formatDuration, tripDurationMin } from "../domain/duration";
 import { formatTicketPrice } from "../domain/price";
-import { TRAIN_CATEGORIES, type Station, type TrainCategory, type Trip } from "../domain/types";
+import type { Station, Trip } from "../domain/types";
 import { summarizeTrips, type CityCount } from "./summarize";
+import { yearlyNewPlaces, type YearFootprint } from "./footprints";
 
 export type SliceStats = {
   tripCount: number;
@@ -15,13 +16,11 @@ export type SliceStats = {
   ticketPriceLabel: string;
 };
 
-export type YearSlice = SliceStats & { year: string };
-export type CategorySlice = SliceStats & { category: TrainCategory };
+export type YearSlice = SliceStats & YearFootprint;
 
 export type AnalyzeStats = {
   years: string[];
   byYear: YearSlice[];
-  byCategory: CategorySlice[];
 };
 
 export type MonthCount = { month: number; label: string; count: number };
@@ -29,8 +28,9 @@ export type MonthCount = { month: number; label: string; count: number };
 export type YearView = {
   year: string;
   slice: SliceStats;
+  newCityCount: number;
+  newStationCount: number;
   byMonth: MonthCount[];
-  byCategory: CategorySlice[];
   topCities: CityCount[];
 };
 
@@ -88,32 +88,8 @@ function groupBy<K>(trips: Trip[], keyOf: (trip: Trip) => K): Map<K, Trip[]> {
   return groups;
 }
 
-function slicesFrom<K, T>(
-  groups: Map<K, Trip[]>,
-  stations: Station[],
-  order: K[],
-  toRow: (key: K, stats: SliceStats) => T,
-): T[] {
-  return order.flatMap((key) => {
-    const trips = groups.get(key);
-    if (!trips) return [];
-    return [toRow(key, sliceStats(trips, stations))];
-  });
-}
-
-function categorySlices(trips: Trip[], stations: Station[]): CategorySlice[] {
-  const categories = groupBy(trips, (trip) => trip.category);
-  const categoryKeys = [...TRAIN_CATEGORIES].sort(
-    (a, b) => (categories.get(b)?.length ?? 0) - (categories.get(a)?.length ?? 0),
-  );
-  return slicesFrom(categories, stations, categoryKeys, (category, stats) => ({
-    category,
-    ...stats,
-  }));
-}
-
-export function listYears(trips: Trip[]): string[] {
-  return [...new Set(trips.map((trip) => trip.date.slice(0, 4)))].sort((a, b) => b.localeCompare(a));
+export function listYears(trips: Trip[], stations: Station[] = []): string[] {
+  return yearlyNewPlaces(trips, stations).map((item) => item.year).reverse();
 }
 
 export function monthCounts(trips: Trip[]): MonthCount[] {
@@ -131,21 +107,22 @@ export function monthCounts(trips: Trip[]): MonthCount[] {
 
 export function analyzeTrips(trips: Trip[], stations: Station[]): AnalyzeStats {
   const years = groupBy(trips, (trip) => trip.date.slice(0, 4));
-  const yearKeys = [...years.keys()].sort((a, b) => b.localeCompare(a));
+  const footprints = yearlyNewPlaces(trips, stations).reverse();
   return {
-    years: yearKeys,
-    byYear: slicesFrom(years, stations, yearKeys, (year, stats) => ({ year, ...stats })),
-    byCategory: categorySlices(trips, stations),
+    years: footprints.map((item) => item.year),
+    byYear: footprints.map((item) => ({ ...item, ...sliceStats(years.get(item.year) ?? [], stations) })),
   };
 }
 
 export function analyzeYear(trips: Trip[], stations: Station[], year: string): YearView {
   const yearTrips = trips.filter((trip) => trip.date.slice(0, 4) === year);
+  const footprint = yearlyNewPlaces(trips, stations).find((item) => item.year === year);
   return {
     year,
     slice: sliceStats(yearTrips, stations),
+    newCityCount: footprint?.newCityCount ?? 0,
+    newStationCount: footprint?.newStationCount ?? 0,
     byMonth: monthCounts(yearTrips),
-    byCategory: categorySlices(yearTrips, stations),
     topCities: summarizeTrips(yearTrips, stations).topCities,
   };
 }

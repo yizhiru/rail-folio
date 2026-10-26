@@ -423,9 +423,9 @@ describe("summarizeTrips", () => {
     ];
     const stats = summarizeTrips(trips, bundledStations);
     expect(stats.byYear).toEqual([
-      { year: "2023", count: 3, spend: 300.3, pricedCount: 2 },
-      { year: "2024", count: 1, spend: undefined, pricedCount: 0 },
-      { year: "2025", count: 1, spend: 80, pricedCount: 1 },
+      { year: "2023", count: 3, spend: 300.3, pricedCount: 2, newCityCount: 2, newStationCount: 2 },
+      { year: "2024", count: 1, spend: undefined, pricedCount: 0, newCityCount: 0, newStationCount: 0 },
+      { year: "2025", count: 1, spend: 80, pricedCount: 1, newCityCount: 0, newStationCount: 0 },
     ]);
     const spent = stats.byYear.reduce((sum, item) => sum + (item.spend ?? 0), 0);
     expect(Math.round(spent * 100) / 100).toBe(stats.totalTicketPrice);
